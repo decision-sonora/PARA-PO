@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PARA-PO Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: Arial; margin: 0; display: flex; height: 100vh; }
+        #sidebar { width: 250px; padding: 20px; background: #1e1e2f; color: white; }
+        #map { flex-grow: 1; }
+        .card { background: #27293d; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 4px solid #00f2c3; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h2>Live Jeepneys</h2>
+        <div id="jeepney-list">Waiting for data...</div>
+    </div>
+    <div id="map"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([6.9273, 122.0588], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        const markers = {};
+        const socket = io();
+
+        socket.on('jeepney_update', (data) => {
+            const route = data.route;
+            if (markers[route]) {
+                markers[route].setLatLng([data.lat, data.lon]);
+            } else {
+                const icon = L.divIcon({ className: 'icon', html: '🚐', iconSize: [30, 30] });
+                markers[route] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(route);
+            }
+            document.getElementById('jeepney-list').innerHTML = `<div class="card"><strong>${route}</strong><br>Moving</div>`;
+        });
+
+        socket.on('jeepney_lost', (route) => {
+            if (markers[route]) {
+                map.removeLayer(markers[route]);
+                delete markers[route];
+            }
+            document.getElementById('jeepney-list').innerHTML = "No jeepneys nearby.";
+        });
+    </script>
+</body>
+</html>
