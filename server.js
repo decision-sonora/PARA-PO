@@ -2,10 +2,17 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const path = require('path'); // Added this
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// THIS IS THE FIX: Tell Express to serve your HTML file
+app.use(express.static(__dirname));
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
