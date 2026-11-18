@@ -29,7 +29,7 @@ app.post('/api/ask-ai', async (req, res) => {
         const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. Base fare is PHP 13 + PHP 15/km. Popular routes: Ayala, Sinnunuc.";
 
         const completion = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile", // Free, fast model on Groq
+            model: "openai/gpt-oss-120b", // UPDATED TO CURRENT SUPPORTED MODEL
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userMessage }
@@ -50,10 +50,9 @@ app.get('/admin-secret-2026', (req, res) => res.sendFile(path.join(__dirname, 'a
 
 // ==================== REAL-TIME DATA ====================
 let activeJeepneys = {}; 
-let testJeepneys = {}; // Track admin test vehicles separately
-let testPassengers = {}; // Track admin test passengers
+let testJeepneys = {}; 
+let testPassengers = {}; 
 
-// ESP32 sends data here
 app.post('/api/update', (req, res) => {
     const data = req.body;
     activeJeepneys[data.plate] = data;
@@ -61,7 +60,6 @@ app.post('/api/update', (req, res) => {
     res.status(200).send("OK");
 });
 
-// Haversine helper
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -71,7 +69,6 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 io.on('connection', (socket) => {
-    // Send initial data
     socket.emit('initial_jeepneys', activeJeepneys);
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
@@ -80,6 +77,7 @@ io.on('connection', (socket) => {
     socket.on('admin_place_test_jeepney', (data) => {
         const plate = "TEST-" + Math.floor(Math.random() * 1000);
         testJeepneys[plate] = { plate: plate, route: data.route, lat: data.lat, lon: data.lon };
+        console.log(`[ADMIN] Placed Test Jeepney: ${plate}`);
         io.emit('test_jeepney_update', testJeepneys[plate]);
     });
 
@@ -102,6 +100,7 @@ io.on('connection', (socket) => {
     socket.on('admin_place_test_passenger', (data) => {
         const id = "PASS-" + Math.floor(Math.random() * 1000);
         testPassengers[id] = { id: id, lat: data.lat, lon: data.lon };
+        console.log(`[ADMIN] Placed Test Passenger: ${id}`);
         io.emit('test_passenger_update', testPassengers[id]);
     });
 
@@ -123,7 +122,6 @@ io.on('connection', (socket) => {
         let closestJeep = null;
         let minDistance = Infinity;
 
-        // Check both real and test jeepneys
         const allJeeps = { ...activeJeepneys, ...testJeepneys };
         for (let plate in allJeeps) {
             const jeep = allJeeps[plate];
@@ -145,7 +143,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- DRIVER: Acknowledge ---
     socket.on('driver_acknowledge', (data) => {
         io.emit('ping_acknowledged', { plate: data.plate });
     });
