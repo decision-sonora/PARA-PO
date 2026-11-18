@@ -25,11 +25,29 @@ app.post('/api/ask-ai', async (req, res) => {
 
         const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep your answers short and friendly. The base fare is PHP 13 and it is PHP 15 per kilometer. Popular routes are Ayala and Sinnunuc. If asked unrelated topics, steer back to commuting.";
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3.8-flash", // UPDATED MODEL NAME
-            contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
-        });
-        res.json({ reply: response.text });
+        let aiReply = null;
+        
+        // Try the latest model first, then fallback to older models if it's busy
+        try {
+            const response = await ai.models.generateContent({
+                model: "gemini-3.8-flash", 
+                contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
+            });
+            aiReply = response.text;
+        } catch (err1) {
+            console.log("Primary model busy, trying fallback...");
+            try {
+                const response = await ai.models.generateContent({
+                    model: "gemini-1.5-flash", 
+                    contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
+                });
+                aiReply = response.text;
+            } catch (err2) {
+                return res.status(503).json({ error: "Our AI is currently experiencing high demand. Please try again in a minute." });
+            }
+        }
+
+        res.json({ reply: aiReply });
     } catch (error) {
         console.error("AI Error:", error);
         res.status(500).json({ error: "AI Error: " + error.message }); 
