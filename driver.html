@@ -9,29 +9,24 @@
         #map { height: 100%; width: 100%; background: #333; }
         #alert-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; padding: 20px; }
         
-        /* Capacity UI (Automated) */
         #capacity-panel { background: #27293d; padding: 15px 30px; border-radius: 8px; border: 1px solid #00f2c3; display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
         #pass-count { font-size: 24px; font-weight: bold; color: #00f2c3; }
         #full-status { font-size: 20px; font-weight: bold; padding: 10px 20px; border-radius: 5px; cursor: pointer; user-select: none;}
         .status-full { background: #fd5d93; color: white; }
         .status-open { background: #00f2c3; color: #1e1e2f; }
 
-        /* Proximity Stop Alert */
         #stop-alert { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(253, 93, 147, 0.95); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: white; }
         #stop-alert h1 { font-size: 60px; margin: 0; animation: flash 0.5s infinite; }
         #stop-alert p { font-size: 30px; margin: 10px 0; }
         #stop-btn { background: #1e1e2f; color: #00f2c3; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 20px;}
 
-        /* Normal Alert Banner */
         #alert-banner { display: none; background: #fd5d93; color: white; padding: 20px; border-radius: 15px; font-size: 22px; font-weight: bold; animation: flash 1s infinite; text-align: center; margin-bottom: 15px; width: 90%; max-width: 600px;}
         #ack-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 15px 30px; font-size: 20px; border-radius: 10px; cursor: pointer; font-weight: bold; }
         
-        /* Top Bar */
         #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; justify-content: space-between; pointer-events: none; }
         .top-panel { background: rgba(30, 30, 47, 0.9); color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold; pointer-events: auto; border: 1px solid #00f2c3; }
         .top-panel select { margin-left: 10px; padding: 5px; border-radius: 5px; font-weight: bold; }
 
-        /* Login Modal */
         #login-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e1e2f; z-index: 10000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
         #login-modal h2 { color: #00f2c3; }
         #jeepney-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 20px; }
@@ -70,7 +65,6 @@
     </div>
     
     <div id="alert-area">
-        <!-- Automated Capacity UI -->
         <div id="capacity-panel">
             <div style="font-size: 16px;">Passengers: <span id="pass-count">0 / 20</span></div>
             <div id="full-status" class="status-open" onclick="toggleFullStatus()">NOT FULL</div>
@@ -101,7 +95,6 @@
         let currentJeepLat = null, currentJeepLon = null;
         let stopAlertActive = false;
 
-        // Capacity Variables
         let currentCount = 0;
         const MAX_CAPACITY = 20;
         let isFull = false;
@@ -124,7 +117,6 @@
             }
         }
 
-        // --- Capacity Logic (Automated via Server) ---
         function updateCapacityDisplay() {
             document.getElementById('pass-count').innerText = `${currentCount} / ${MAX_CAPACITY}`;
             const statusDiv = document.getElementById('full-status');
@@ -143,7 +135,6 @@
             socket.emit('toggle_full', { plate: selectedPlate, isFull: isFull });
         }
 
-        // --- Data & Listeners ---
         socket.on('initial_status', (data) => {
             if(data[selectedPlate]) {
                 currentCount = data[selectedPlate].count;
@@ -158,10 +149,9 @@
                 isFull = data.status.isFull;
                 updateCapacityDisplay();
                 
-                // Voice alert when someone boards
                 if ('speechSynthesis' in window) {
                     window.speechSynthesis.cancel();
-                    const speech = new SpeechSynthesisUtterance("A passenger has boarded.");
+                    const speech = new SpeechSynthesisUtterance("A passenger has boarded or disembarked.");
                     window.speechSynthesis.speak(speech);
                 }
             }
@@ -191,9 +181,15 @@
             if (count === 0) listDiv.innerHTML = '<p style="color: #aaa;">Waiting for jeepneys...</p>';
         }
 
+        // --- Initial Load (Fixes Refresh Issue) ---
         socket.on('initial_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
         socket.on('initial_test_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
+        socket.on('initial_test_passengers', (data) => {
+            for (let id in data) passengers[id] = data[id];
+            updatePassengerMarkers();
+        });
 
+        // --- Live Updates ---
         socket.on('jeepney_update', (data) => {
             availableJeeps[data.plate] = data;
             updateJeepneyList(); 
@@ -214,7 +210,6 @@
             }
         });
 
-        // --- Passenger Listeners ---
         socket.on('passenger_location_update', (data) => {
             passengers['real'] = data;
             updatePassengerMarkers();
@@ -240,7 +235,6 @@
             checkProximity();
         }
 
-        // --- Proximity Detection ---
         function getDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; 
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -280,7 +274,6 @@
             document.getElementById('stop-alert').style.display = 'none';
         }
 
-        // --- Map Update ---
         function updateDriverMap() {
             if(currentJeepLat === null) return;
             map.setView([currentJeepLat, currentJeepLon], 17);
@@ -297,7 +290,6 @@
             checkProximity();
         }
 
-        // --- Standard Ping Alert ---
         socket.on('driver_alert', (data) => {
             if (data.plate !== selectedPlate) return;
 
