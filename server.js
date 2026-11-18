@@ -4,7 +4,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
-const { GoogleGenAI } = require('@google/genai');
+const OpenAI = require('openai');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,40 +14,29 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ==================== AI SETUP ====================
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// ==================== DEEPSEEK AI SETUP ====================
+const deepseek = new OpenAI({
+    baseURL: 'https://api.deepseek.com',
+    apiKey: process.env.DEEPSEEK_API_KEY || 'missing-key'
+});
 
 app.post('/api/ask-ai', async (req, res) => {
     try {
         const userMessage = req.body.message;
         if (!userMessage) return res.status(400).json({ error: "Message required" });
-        if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: "GEMINI_API_KEY missing in Render Environment Variables." });
+        if (!process.env.DEEPSEEK_API_KEY) return res.status(500).json({ error: "DEEPSEEK_API_KEY missing in Render." });
 
-        const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep your answers short and friendly. The base fare is PHP 13 and it is PHP 15 per kilometer. Popular routes are Ayala and Sinnunuc. If asked unrelated topics, steer back to commuting.";
+        const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. Base fare is PHP 13 + PHP 15/km. Popular routes: Ayala, Sinnunuc.";
 
-        let aiReply = null;
-        
-        // Try the latest model first, then fallback to older models if it's busy
-        try {
-            const response = await ai.models.generateContent({
-                model: "gemini-3.8-flash", 
-                contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
-            });
-            aiReply = response.text;
-        } catch (err1) {
-            console.log("Primary model busy, trying fallback...");
-            try {
-                const response = await ai.models.generateContent({
-                    model: "gemini-1.5-flash", 
-                    contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
-                });
-                aiReply = response.text;
-            } catch (err2) {
-                return res.status(503).json({ error: "Our AI is currently experiencing high demand. Please try again in a minute." });
-            }
-        }
+        const completion = await deepseek.chat.completions.create({
+            model: "deepseek-chat", 
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userMessage }
+            ],
+        });
 
-        res.json({ reply: aiReply });
+        res.json({ reply: completion.choices[0].message.content });
     } catch (error) {
         console.error("AI Error:", error);
         res.status(500).json({ error: "AI Error: " + error.message }); 
@@ -59,9 +48,10 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
 app.get('/admin-secret-2026', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
-// ==================== REAL-TIME DATA & DRIFT FILTER ====================
+// ==================== REAL-TIME DATA ====================
 let activeJeepneys = {}; 
 
+// Haversine helper (for distance calculations)
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -73,37 +63,40 @@ function getDistance(lat1, lon1, lat2, lon2) {
 io.on('connection', (socket) => {
     socket.emit('initial_data', activeJeepneys);
 
+    // ESP32 sends real data here
     socket.on('esp32_update', (data) => {
-        const prev = activeJeepneys[data.plate];
-        if (prev) {
-            const dist = getDistance(prev.lat, prev.lon, data.lat, data.lon);
-            const timeDiff = (Date.now() - prev.lastUpdate) / 1000;
-            if (dist > 100 && timeDiff < 2) return; // Ignore GPS drift
-        }
-        data.lastUpdate = Date.now();
         activeJeepneys[data.plate] = data;
         io.emit('jeepney_update', data);
     });
 
-    socket.on('admin_place_jeepney', (data) => {
-        const plate = "TEST-" + Math.floor(Math.random()*1000);
-        const jeep = { plate: plate, route: data.route, lat: data.lat, lon: data.lon, lastUpdate: Date.now() };
-        activeJeepneys[plate] = jeep;
-        io.emit('jeepney_update', jeep);
-    });
-
-    socket.on('admin_place_passenger', (data) => {
-        io.emit('passenger_update', { lat: data.lat, lon: data.lon });
-    });
-
+    // Calculate distance when a passenger pings
     socket.on('passenger_ping', (data) => {
-        io.emit('driver_alert', { 
-            plate: data.plate, 
-            message: `Passenger waiting nearby at coordinates ${data.lat.toFixed(4)}, ${data.lon.toFixed(4)}` 
-        });
-        socket.emit('ping_sent', { plate: data.plate });
+        // Find the closest jeepney to the passenger
+        let closestJeep = null;
+        let minDistance = Infinity;
+
+        for (let plate in activeJeepneys) {
+            const jeep = activeJeepneys[plate];
+            const dist = getDistance(jeep.lat, jeep.lon, data.passLat, data.passLon);
+            if (dist < minDistance) {
+                minDistance = dist;
+                closestJeep = jeep;
+            }
+        }
+
+        if (closestJeep) {
+            // Alert the driver
+            io.emit('driver_alert', { 
+                plate: closestJeep.plate, 
+                message: `Passenger waiting ${Math.round(minDistance)} meters away!` 
+            });
+            socket.emit('ping_sent', { plate: closestJeep.plate, distance: minDistance });
+        } else {
+            socket.emit('ping_sent', { error: "No jeepneys active nearby." });
+        }
     });
 
+    // Driver acknowledges ping
     socket.on('driver_acknowledge', (data) => {
         io.emit('ping_acknowledged', { plate: data.plate });
     });
