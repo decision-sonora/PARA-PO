@@ -10,7 +10,6 @@
         .card { background: #27293d; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 4px solid #00f2c3; }
         .ping-btn { background: #fd5d93; color: white; border: none; padding: 8px; width: 100%; border-radius: 5px; cursor: pointer; margin-top: 10px; font-weight: bold;}
         
-        /* Boarding Buttons */
         #board-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 15px; width: 100%; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 18px; margin-top: 15px; animation: pulse 1s infinite; }
         #disembark-btn { display: none; background: #fd5d93; color: white; border: none; padding: 20px; width: 100%; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 20px; margin-top: 15px; animation: pulse 1.5s infinite; }
         
@@ -23,7 +22,6 @@
         #search-btn { background: #00f2c3; color: #1e1e2f; border: none; padding: 10px 15px; border-radius: 0 5px 5px 0; cursor: pointer; font-weight: bold; }
         .loc-controls { display: flex; margin-bottom: 15px; }
         
-        /* Chatbot */
         #chat-toggle { position: absolute; bottom: 20px; right: 20px; background: #1e1e2f; color: white; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 30px; cursor: pointer; z-index: 3000; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
         #chat-container { display: none; position: absolute; bottom: 90px; right: 20px; width: 320px; background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); flex-direction: column; z-index: 2000; overflow: hidden; }
         #chat-header { background: #1e1e2f; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; }
@@ -46,7 +44,6 @@
     <div id="sidebar">
         <h2>PARA-PO Live</h2>
         
-        <!-- Normal Controls -->
         <div id="normal-controls">
             <div id="search-container">
                 <input type="text" id="location-search" placeholder="Search location..." onkeypress="handleSearchEnter(event)">
@@ -96,7 +93,6 @@
         let myMarker = null; 
         let manualMode = false;
         
-        // Boarding / Tracking State
         let isBoarded = false;
         let boardedJeepneyPlate = null;
         let activePingPlate = null; 
@@ -105,7 +101,6 @@
 
         const socket = io();
 
-        // Helper to generate icon with Name above
         function getJeepneyIcon(plate) {
             return L.divIcon({
                 html: `<div class="custom-jeep-icon"><div class="jeep-name">${plate}</div><div class="jeep-emoji">🚐</div></div>`,
@@ -114,7 +109,6 @@
             });
         }
 
-        // --- Private Location System ---
         function setMyLocation(lat, lon) {
             passengerLatLng = [lat, lon];
             const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
@@ -171,7 +165,6 @@
             } catch (err) { alert("Error searching."); }
         }
 
-        // --- Ping & Tracking System ---
         function pingDriver(plate) {
             if(isBoarded) return;
             if(!passengerLatLng) return alert("Please set your location first.");
@@ -194,12 +187,10 @@
             pingLine.bindTooltip(`${Math.round(dist)} meters away`, {permanent: true, direction: "center", className: "dist-tooltip"}).openTooltip();
         }
 
-        // --- Boarding & Disembarking ---
         function confirmBoard() {
             if(!activePingPlate) return;
             socket.emit('passenger_board', { plate: activePingPlate });
             
-            // Transition to Riding Mode
             isBoarded = true;
             boardedJeepneyPlate = activePingPlate;
             
@@ -209,22 +200,15 @@
             document.getElementById('jeepney-list').style.display = 'none';
             document.getElementById('alert-box').style.display = 'none';
             
-            // Hide other markers
             for (let plate in markers) {
-                if (plate !== boardedJeepneyPlate) {
-                    map.removeLayer(markers[plate]);
-                }
+                if (plate !== boardedJeepneyPlate) map.removeLayer(markers[plate]);
             }
             for (let plate in geofences) {
-                if (plate !== boardedJeepneyPlate) {
-                    map.removeLayer(geofences[plate]);
-                }
+                if (plate !== boardedJeepneyPlate) map.removeLayer(geofences[plate]);
             }
             
-            // Remove ping line
             if(pingLine) { map.removeLayer(pingLine); pingLine = null; }
 
-            // Lock Map on Jeepney
             map.dragging.disable();
             map.touchZoom.disable();
             map.scrollWheelZoom.disable();
@@ -237,9 +221,7 @@
             if(!isBoarded) return;
             socket.emit('passenger_disembark', { plate: boardedJeepneyPlate });
             
-            // Return to Normal Mode
             isBoarded = false;
-            const previousPlate = boardedJeepneyPlate;
             boardedJeepneyPlate = null;
             activePingPlate = null;
             
@@ -248,13 +230,11 @@
             document.getElementById('normal-controls').style.display = 'block';
             document.getElementById('jeepney-list').style.display = 'block';
             
-            // Re-enable Map controls
             map.dragging.enable();
             map.touchZoom.enable();
             map.scrollWheelZoom.enable();
-            map.setView([6.9273, 122.0588], 14); // Reset view
+            map.setView([6.9273, 122.0588], 14); 
             
-            // Reload all jeepneys
             renderSidebar();
             for (let plate in activeData) {
                 handleJeepneyUpdate(activeData[plate]); 
@@ -262,8 +242,11 @@
             checkGeofence();
         }
 
-        // --- Real-time Listeners ---
+        // --- Initial Load (Fixes Refresh Issue) ---
         socket.on('initial_jeepneys', (data) => { for (let plate in data) handleJeepneyUpdate(data[plate]); });
+        socket.on('initial_test_jeepneys', (data) => { for (let plate in data) handleJeepneyUpdate(data[plate]); });
+
+        // --- Live Updates ---
         socket.on('jeepney_update', (data) => handleJeepneyUpdate(data));
         socket.on('test_jeepney_update', (data) => handleJeepneyUpdate(data));
 
@@ -281,16 +264,14 @@
         function handleJeepneyUpdate(data) {
             activeData[data.plate] = data;
             
-            // If I am riding, ONLY track my jeepney
             if (isBoarded) {
                 if (data.plate === boardedJeepneyPlate) {
                     if (markers[data.plate]) markers[data.plate].setLatLng([data.lat, data.lon]);
-                    map.setView([data.lat, data.lon], 18); // Follow the jeepney
+                    map.setView([data.lat, data.lon], 18); 
                 }
                 return;
             }
 
-            // Normal mode rendering
             if (markers[data.plate]) {
                 markers[data.plate].setLatLng([data.lat, data.lon]);
             } else {
@@ -335,7 +316,6 @@
             document.getElementById('alert-box').style.display = nearby ? 'block' : 'none';
         }
 
-        // ==================== CHATBOT ====================
         function toggleChat() {
             const chat = document.getElementById('chat-container');
             chat.style.display = chat.style.display === 'flex' ? 'none' : 'flex';
