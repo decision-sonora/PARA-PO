@@ -2,75 +2,14 @@
 <html>
 <head>
     <title>Admin - PARA-PO</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: Arial; background: #1e1e2f; color: white; padding: 20px; display: flex; height: 100vh; box-sizing: border-box; }
-        #sidebar { width: 320px; padding-right: 20px; }
-        #map { flex-grow: 1; border-radius: 8px; border: 2px solid #00f2c3; }
-        button { width: 100%; padding: 15px; font-size: 16px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .btn-jeep { background: #00f2c3; color: #1e1e2f; }
-        .btn-pass { background: #fd5d93; color: white; }
-        .active-mode { border: 3px solid white; }
-        select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
+        body { font-family: Arial; background: #1e1e2f; color: white; text-align: center; padding: 50px; }
+        h1 { color: #00f2c3; }
     </style>
 </head>
 <body>
-    <div id="sidebar">
-        <h2>🛡️ Admin Hub</h2>
-        
-        <select id="admin-route">
-            <option value="AYALA">Ayala Route</option>
-            <option value="SINNUNUC">Sinnunuc Route</option>
-        </select>
-
-        <p>Select mode, then click map:</p>
-        <button id="btn-jeep" class="btn-jeep" onclick="setMode('jeepney')">📍 Place Test Jeepney</button>
-        <button id="btn-pass" class="btn-pass" onclick="setMode('passenger')">🧍 Place Test Passenger</button>
-        
-        <p id="status" style="margin-top:20px; font-size:14px; color:#aaa;">Mode: None selected.</p>
-    </div>
-    <div id="map"></div>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const map = L.map('map').setView([6.9273, 122.0588], 14);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-
-        const socket = io();
-        let currentMode = null;
-        let jeepMarker = null;
-        let passMarker = null;
-
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('status').innerText = "Mode: Click on the map to place the " + mode;
-            document.getElementById('btn-jeep').classList.remove('active-mode');
-            document.getElementById('btn-pass').classList.remove('active-mode');
-            if(mode === 'jeepney') document.getElementById('btn-jeep').classList.add('active-mode');
-            if(mode === 'passenger') document.getElementById('btn-pass').classList.add('active-mode');
-        }
-
-        map.on('click', (e) => {
-            if(currentMode === 'jeepney') {
-                if(jeepMarker) map.removeLayer(jeepMarker);
-                const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
-                jeepMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: icon}).addTo(map);
-                const route = document.getElementById('admin-route').value;
-                socket.emit('admin_place_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng, route: route });
-                document.getElementById('status').innerText = "Test Jeepney placed!";
-            } 
-            else if (currentMode === 'passenger') {
-                if(passMarker) map.removeLayer(passMarker);
-                const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-                passMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: icon}).addTo(map);
-                socket.emit('admin_place_passenger', { lat: e.latlng.lat, lon: e.latlng.lng });
-                document.getElementById('status').innerText = "Test Passenger placed!";
-            }
-            currentMode = null;
-            document.getElementById('btn-jeep').classList.remove('active-mode');
-            document.getElementById('btn-pass').classList.remove('active-mode');
-        });
-    </script>
+    <h1>🛡️ PARA-PO Admin Hub</h1>
+    <p>This system now only monitors real ESP32 devices.</p>
+    <p>Test jeepneys and passengers have been disabled.</p>
 </body>
 </html>
