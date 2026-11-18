@@ -4,10 +4,18 @@
     <title>PARA-PO Driver Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: Arial; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e2f; }
+        body { font-family: Arial; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e2f; overflow: hidden;}
         #map-container { height: 45vh; width: 100%; position: relative; }
-        #map { height: 100%; width: 100%; }
+        #map { height: 100%; width: 100%; background: #333; }
         #alert-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; padding: 20px; }
+        
+        /* Proximity Stop Alert */
+        #stop-alert { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(253, 93, 147, 0.95); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: white; }
+        #stop-alert h1 { font-size: 60px; margin: 0; animation: flash 0.5s infinite; }
+        #stop-alert p { font-size: 30px; margin: 10px 0; }
+        #stop-btn { background: #1e1e2f; color: #00f2c3; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 20px;}
+
+        /* Normal Alert Banner */
         #alert-banner { display: none; background: #fd5d93; color: white; padding: 30px; border-radius: 15px; font-size: 28px; font-weight: bold; animation: flash 1s infinite; text-align: center; margin-bottom: 20px; width: 90%; max-width: 600px;}
         #ack-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; }
         
@@ -17,7 +25,7 @@
         .top-panel select { margin-left: 10px; padding: 5px; border-radius: 5px; font-weight: bold; }
 
         /* Login Modal */
-        #login-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e1e2f; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
+        #login-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e1e2f; z-index: 10000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
         #login-modal h2 { color: #00f2c3; }
         #jeepney-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 20px; }
         .jeep-btn { background: #27293d; color: white; border: 2px solid #444; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; transition: 0.2s; min-width: 250px;}
@@ -27,10 +35,18 @@
     </style>
 </head>
 <body>
+    <!-- Login Modal -->
     <div id="login-modal">
         <h2>Select Your Jeepney</h2>
         <p>Choose the vehicle you are currently driving:</p>
         <div id="jeepney-list"></div>
+    </div>
+
+    <!-- Proximity Stop Alert (Covers entire screen) -->
+    <div id="stop-alert">
+        <h1>🛑 STOP!</h1>
+        <p>Passenger is within 10 meters.</p>
+        <button id="stop-btn" onclick="dismissStopAlert()">✅ OK, I SEE THEM</button>
     </div>
 
     <div id="map-container">
@@ -56,15 +72,29 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 16);
+        // Locked map: Disables dragging, zooming, and scrolling
+        const map = L.map('map', { 
+            dragging: false, 
+            zoomControl: false, 
+            touchZoom: false, 
+            scrollWheelZoom: false, 
+            doubleClickZoom: false,
+            boxZoom: false,
+            keyboard: false
+        }).setView([6.9273, 122.0588], 17);
+        
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const socket = io();
         let driverMarker = null;
         let geofenceCircle = null;
-        let passengerMarker = null;
         let selectedPlate = null;
         let availableJeeps = {};
+        
+        let passengers = {};
+        let passengerLayerGroup = L.layerGroup().addTo(map);
+        let currentJeepLat = null, currentJeepLon = null;
+        let stopAlertActive = false;
 
         function selectJeepney(plate) {
             selectedPlate = plate;
@@ -73,8 +103,9 @@
             
             if(availableJeeps[plate]) {
                 document.getElementById('route-select').value = availableJeeps[plate].route;
-                // Center map immediately on selected jeepney
-                map.setView([availableJeeps[plate].lat, availableJeeps[plate].lon], 16);
+                currentJeepLat = availableJeeps[plate].lat;
+                currentJeepLon = availableJeeps[plate].lon;
+                map.setView([currentJeepLat, currentJeepLon], 17);
             }
 
             if ('speechSynthesis' in window) {
@@ -109,20 +140,28 @@
             }
         }
 
-        // --- Data Listeners ---
+        // --- Real-time Listeners ---
         socket.on('initial_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
         socket.on('initial_test_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
 
         socket.on('jeepney_update', (data) => {
             availableJeeps[data.plate] = data;
             updateJeepneyList(); 
-            if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
+            if (data.plate === selectedPlate) {
+                currentJeepLat = data.lat;
+                currentJeepLon = data.lon;
+                updateDriverMap();
+            }
         });
 
         socket.on('test_jeepney_update', (data) => {
             availableJeeps[data.plate] = data;
             updateJeepneyList();
-            if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
+            if (data.plate === selectedPlate) {
+                currentJeepLat = data.lat;
+                currentJeepLon = data.lon;
+                updateDriverMap();
+            }
         });
 
         socket.on('test_jeepney_deleted', (plate) => {
@@ -134,24 +173,92 @@
             }
         });
 
-        // --- Passenger Visibility ---
+        // --- Passenger Listeners ---
         socket.on('passenger_location_update', (data) => {
-            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-            if (passengerMarker) passengerMarker.setLatLng([data.lat, data.lon]);
-            else passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("Passenger Location");
+            passengers['real'] = data;
+            updatePassengerMarkers();
         });
 
         socket.on('test_passenger_update', (data) => {
-            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-            if (passengerMarker) passengerMarker.setLatLng([data.lat, data.lon]);
-            else passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("Test Passenger");
+            passengers[data.id] = data;
+            updatePassengerMarkers();
         });
 
-        socket.on('test_passenger_deleted', () => {
-            if(passengerMarker) { map.removeLayer(passengerMarker); passengerMarker = null; }
+        socket.on('test_passenger_deleted', (id) => {
+            delete passengers[id];
+            updatePassengerMarkers();
         });
 
-        // --- Alerts ---
+        function updatePassengerMarkers() {
+            passengerLayerGroup.clearLayers();
+            for (let id in passengers) {
+                const p = passengers[id];
+                const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+                L.marker([p.lat, p.lon], {icon: icon}).addTo(passengerLayerGroup).bindPopup("Passenger");
+            }
+            checkProximity();
+        }
+
+        // --- Proximity Detection ---
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        }
+
+        function checkProximity() {
+            if (currentJeepLat === null || currentJeepLon === null) return;
+            
+            let closestDist = Infinity;
+            for (let id in passengers) {
+                const p = passengers[id];
+                const d = getDistance(currentJeepLat, currentJeepLon, p.lat, p.lon);
+                if (d < closestDist) closestDist = d;
+            }
+            
+            // If between 1 and 10 meters
+            if (closestDist >= 1 && closestDist <= 10) {
+                if (!stopAlertActive) {
+                    stopAlertActive = true;
+                    document.getElementById('stop-alert').style.display = 'flex';
+                    
+                    if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                        const speech = new SpeechSynthesisUtterance("Passenger is within 10 meters. Prepare to stop.");
+                        speech.rate = 1; 
+                        window.speechSynthesis.speak(speech);
+                    }
+                }
+            } else {
+                stopAlertActive = false;
+                document.getElementById('stop-alert').style.display = 'none';
+            }
+        }
+
+        function dismissStopAlert() {
+            stopAlertActive = true; // Keeps it dismissed until they move away
+            document.getElementById('stop-alert').style.display = 'none';
+        }
+
+        // --- Map Update (Locked to Jeepney) ---
+        function updateDriverMap() {
+            map.setView([currentJeepLat, currentJeepLon], 17);
+
+            if (driverMarker) driverMarker.setLatLng([currentJeepLat, currentJeepLon]);
+            else {
+                const icon = L.divIcon({ html: '🚐', iconSize: [40, 40], className: '' });
+                driverMarker = L.marker([currentJeepLat, currentJeepLon], {icon: icon}).addTo(map);
+            }
+
+            if (geofenceCircle) map.removeLayer(geofenceCircle);
+            geofenceCircle = L.circle([currentJeepLat, currentJeepLon], { color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100 }).addTo(map);
+            
+            checkProximity();
+        }
+
+        // --- Standard Ping Alert ---
         socket.on('driver_alert', (data) => {
             if (data.plate !== selectedPlate) return;
 
@@ -171,19 +278,6 @@
                 document.getElementById('ack-btn').style.display = 'none';
             }, 15000);
         });
-
-        function updateDriverMap(lat, lon) {
-            map.setView([lat, lon], 16);
-
-            if (driverMarker) driverMarker.setLatLng([lat, lon]);
-            else {
-                const icon = L.divIcon({ html: '🚐', iconSize: [40, 40], className: '' });
-                driverMarker = L.marker([lat, lon], {icon: icon}).addTo(map);
-            }
-
-            if (geofenceCircle) map.removeLayer(geofenceCircle);
-            geofenceCircle = L.circle([lat, lon], { color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100 }).addTo(map);
-        }
 
         function acknowledge() {
             if (selectedPlate) socket.emit('driver_acknowledge', { plate: selectedPlate });
