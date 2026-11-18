@@ -104,24 +104,32 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- PASSENGER: Clicked "I Have Boarded" ---
+    // --- PASSENGER: Boarded & Disembarked ---
     socket.on('passenger_board', (data) => {
         const plate = data.plate;
         if (!jeepneyStatus[plate]) {
             jeepneyStatus[plate] = { count: 0, max: 20, isFull: false };
         }
-        
-        // Automatically add +1 to the capacity
         if (jeepneyStatus[plate].count < jeepneyStatus[plate].max) {
             jeepneyStatus[plate].count += 1;
         }
-        
-        // Check if it hits max
         if (jeepneyStatus[plate].count >= jeepneyStatus[plate].max) {
             jeepneyStatus[plate].isFull = true;
         }
-        
         io.emit('status_update', { plate: plate, status: jeepneyStatus[plate] });
+    });
+
+    socket.on('passenger_disembark', (data) => {
+        const plate = data.plate;
+        if (jeepneyStatus[plate]) {
+            if (jeepneyStatus[plate].count > 0) {
+                jeepneyStatus[plate].count -= 1;
+            }
+            if (jeepneyStatus[plate].count < jeepneyStatus[plate].max) {
+                jeepneyStatus[plate].isFull = false;
+            }
+            io.emit('status_update', { plate: plate, status: jeepneyStatus[plate] });
+        }
     });
 
     // --- ADMIN: Place Test Jeepney ---
