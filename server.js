@@ -26,10 +26,17 @@ app.post('/api/ask-ai', async (req, res) => {
         if (!userMessage) return res.status(400).json({ error: "Message required" });
         if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: "GROQ_API_KEY missing in Render." });
 
-        const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. Base fare is PHP 13 + PHP 15/km. Popular routes: Ayala, Sinnunuc.";
+        // UPDATED SYSTEM PROMPT WITH EXACT FARE RULES
+        const systemPrompt = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. 
+        
+        Fare Rules:
+        - Traditional Jeepneys: Minimum fare is PHP 14 for the first four kilometers, with an additional PHP 2 for every succeeding kilometer.
+        - Modern Jeepneys: Minimum fare is PHP 17 for the first four kilometers, with an additional PHP 2.40 for every succeeding kilometer.
+        
+        Popular routes: Ayala, Sinnunuc.`;
 
         const completion = await groq.chat.completions.create({
-            model: "openai/gpt-oss-120b", // UPDATED TO CURRENT SUPPORTED MODEL
+            model: "openai/gpt-oss-120b", 
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userMessage }
@@ -38,7 +45,6 @@ app.post('/api/ask-ai', async (req, res) => {
 
         res.json({ reply: completion.choices[0].message.content });
     } catch (error) {
-        console.error("AI Error:", error);
         res.status(500).json({ error: "AI Error: " + error.message }); 
     }
 });
@@ -73,15 +79,28 @@ io.on('connection', (socket) => {
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
 
+    // --- DRIVER: Update Route ---
+    socket.on('driver_update_route', (data) => {
+        const plate = data.plate;
+        const newRoute = data.route;
+
+        if (activeJeepneys[plate]) {
+            activeJeepneys[plate].route = newRoute;
+            io.emit('jeepney_update', activeJeepneys[plate]);
+        }
+        if (testJeepneys[plate]) {
+            testJeepneys[plate].route = newRoute;
+            io.emit('test_jeepney_update', testJeepneys[plate]);
+        }
+    });
+
     // --- ADMIN: Place Test Jeepney ---
     socket.on('admin_place_test_jeepney', (data) => {
         const plate = "TEST-" + Math.floor(Math.random() * 1000);
         testJeepneys[plate] = { plate: plate, route: data.route, lat: data.lat, lon: data.lon };
-        console.log(`[ADMIN] Placed Test Jeepney: ${plate}`);
         io.emit('test_jeepney_update', testJeepneys[plate]);
     });
 
-    // --- ADMIN: Move Test Jeepney ---
     socket.on('admin_move_test_jeepney', (data) => {
         if (testJeepneys[data.plate]) {
             testJeepneys[data.plate].lat = data.lat;
@@ -90,7 +109,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- ADMIN: Delete Test Jeepney ---
     socket.on('admin_delete_test_jeepney', (plate) => {
         delete testJeepneys[plate];
         io.emit('test_jeepney_deleted', plate);
@@ -100,17 +118,14 @@ io.on('connection', (socket) => {
     socket.on('admin_place_test_passenger', (data) => {
         const id = "PASS-" + Math.floor(Math.random() * 1000);
         testPassengers[id] = { id: id, lat: data.lat, lon: data.lon };
-        console.log(`[ADMIN] Placed Test Passenger: ${id}`);
         io.emit('test_passenger_update', testPassengers[id]);
     });
 
-    // --- ADMIN: Delete Test Passenger ---
     socket.on('admin_delete_test_passenger', (id) => {
         delete testPassengers[id];
         io.emit('test_passenger_deleted', id);
     });
 
-    // --- ADMIN: Clear All ---
     socket.on('admin_clear_all', () => {
         testJeepneys = {};
         testPassengers = {};
