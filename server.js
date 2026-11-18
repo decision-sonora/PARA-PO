@@ -1,8 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
-const { SerialPort } = require('serialport');
-const { ReadlineParser } = require('@serialport/parser-readline');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
@@ -12,12 +10,11 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ==================== AI SETUP ====================
+// ==================== AI CHATBOT SETUP ====================
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.post('/api/ask-ai', async (req, res) => {
@@ -25,14 +22,19 @@ app.post('/api/ask-ai', async (req, res) => {
         const userMessage = req.body.message;
         if (!userMessage) return res.status(400).json({ error: "Message required" });
 
+        // Give the AI a personality and context
+        const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep your answers short and friendly. The base fare is PHP 13 and it is PHP 15 per kilometer. Popular routes are Ayala and Sinnunuc. If asked about the weather or unrelated topics, politely steer them back to commuting.";
+
         const response = await ai.models.generateContent({
             model: "gemini-1.5-flash", 
-            contents: userMessage,
+            contents: [
+                { role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }
+            ]
         });
         res.json({ reply: response.text });
     } catch (error) {
         console.error("AI Error:", error);
-        res.status(500).json({ error: "AI failed to respond" });
+        res.status(500).json({ error: "AI is currently resting. Try again later." });
     }
 });
 
@@ -41,93 +43,43 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// SECRET ADMIN ROUTE
 app.get('/admin-secret-2026', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-// ==================== ESP32 & JEEPNEY DATA ====================
+// ==================== REAL-TIME DATA (SOCKETS) ====================
 let activeJeepneys = {};
 
-// Receives data from ESP32
-app.post('/api/update', (req, res) => {
-    const { route, lat, lon } = req.body;
-    activeJeepneys[route] = { route, lat, lon, lastSeen: Date.now() };
-    io.emit('jeepney_update', activeJeepneys[route]);
-    res.status(200).send("OK");
-});
+io.on('connection', (socket) => {
+    // Send existing jeepneys to new connections
+    socket.emit('initial_data', activeJeepneys);
 
-// Cleanup inactive jeepneys
-setInterval(() => {
-    const now = Date.now();
-    for (let route in activeJeepneys) {
-        if (now - activeJeepneys[route].lastSeen > 30000) {
-            delete activeJeepneys[route];
-            io.emit('jeepney_lost', route);
-        }
-    }
-}, 10000);
-
-// ==================== ADMIN TEST JEEPNEY ====================
-let testInterval = null;
-const TEST_ROUTE_ID = "TEST-JEEP";
-
-app.post('/api/admin/summon-test', (req, res) => {
-    if (testInterval) clearInterval(testInterval);
-
-    let lat = 6.9273;
-    let lon = 122.0588;
-
-    const firstPayload = { route: TEST_ROUTE_ID, lat: lat, lon: lon, lastSeen: Date.now() };
-    activeJeepneys[TEST_ROUTE_ID] = firstPayload;
-    io.emit('jeepney_update', firstPayload);
-
-    testInterval = setInterval(() => {
-        lat += (Math.random() - 0.5) * 0.0002;
-        lon += (Math.random() - 0.5) * 0.0002;
-
-        const payload = { route: TEST_ROUTE_ID, lat: lat, lon: lon, lastSeen: Date.now() };
-        activeJeepneys[TEST_ROUTE_ID] = payload;
-        io.emit('jeepney_update', payload);
-    }, 3000);
-
-    res.json({ status: 'success', lat: lat, lon: lon });
-});
-
-app.post('/api/admin/stop-test', (req, res) => {
-    if (testInterval) clearInterval(testInterval);
-    delete activeJeepneys[TEST_ROUTE_ID];
-    io.emit('jeepney_lost', TEST_ROUTE_ID);
-    res.json({ status: 'stopped' });
-});
-
-// ==================== ESP32 SERIAL BRIDGE ====================
-// Wrapped in try/catch so Render doesn't crash when the ESP32 isn't plugged in
-try {
-    const port = new SerialPort({ path: 'COM3', baudRate: 115200 }); 
-    port.on('error', (err) => console.log("Serial Port Error:", err.message));
-    
-    const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
-    parser.on('data', (data) => {
-        const line = data.trim();
-        if (line.startsWith("SCAN:")) io.emit('scan', line.replace("SCAN:", ""));
-        else if (line.startsWith("BOARD:")) {
-            const parts = line.replace("BOARD:", "").split(",");
-            if (parts.length >= 3) io.emit('board', { uid: parts[0], lat: parseFloat(parts[1]), lon: parseFloat(parts[2]) });
-        } 
-        else if (line.startsWith("DEPART:")) {
-            const parts = line.replace("DEPART:", "").split(",");
-            if (parts.length >= 5) io.emit('depart', { uid: parts[0], lat: parseFloat(parts[1]), lon: parseFloat(parts[2]), dist: parts[3], fare: parts[4] });
-        }
+    // Admin places Test Jeepney
+    socket.on('admin_place_jeepney', (data) => {
+        activeJeepneys["TEST-JEEP"] = { route: "TEST-JEEP", lat: data.lat, lon: data.lon };
+        io.emit('jeepney_update', activeJeepneys["TEST-JEEP"]);
     });
-} catch (err) {
-    console.log("No ESP32 connected via USB. Web app will run without hardware.");
-}
 
-// ==================== START SERVER ====================
+    // Admin places Test Passenger
+    socket.on('admin_place_passenger', (data) => {
+        io.emit('passenger_update', { lat: data.lat, lon: data.lon });
+    });
+
+    // Admin removes Test Jeepney
+    socket.on('admin_remove_jeepney', () => {
+        delete activeJeepneys["TEST-JEEP"];
+        io.emit('jeepney_lost', "TEST-JEEP");
+    });
+
+    // Hardware ESP32 Updates
+    socket.on('esp32_update', (data) => {
+        activeJeepneys[data.route] = data;
+        io.emit('jeepney_update', data);
+    });
+});
+
+// Start Server
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log("=========================================");
     console.log("Website running on port " + PORT);
-    console.log("=========================================");
 });
