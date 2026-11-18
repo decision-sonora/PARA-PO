@@ -5,20 +5,51 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { font-family: Arial; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e2f; }
-        #map-container { height: 40vh; width: 100%; position: relative; }
+        #map-container { height: 45vh; width: 100%; position: relative; }
         #map { height: 100%; width: 100%; }
         #alert-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; padding: 20px; }
-        #driver-id { position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.7); color: #00f2c3; padding: 10px; border-radius: 5px; font-weight: bold; }
         #alert-banner { display: none; background: #fd5d93; color: white; padding: 30px; border-radius: 15px; font-size: 28px; font-weight: bold; animation: flash 1s infinite; text-align: center; margin-bottom: 20px; width: 90%; max-width: 600px;}
         #ack-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        
+        /* Top Bar for Route Selection */
+        #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; justify-content: space-between; pointer-events: none; }
+        .top-panel { background: rgba(30, 30, 47, 0.9); color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold; pointer-events: auto; border: 1px solid #00f2c3; }
+        .top-panel select { margin-left: 10px; padding: 5px; border-radius: 5px; font-weight: bold; }
+
+        /* Login Modal */
+        #login-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e1e2f; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
+        #login-modal h2 { color: #00f2c3; }
+        #jeepney-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 20px; }
+        .jeep-btn { background: #27293d; color: white; border: 2px solid #444; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; transition: 0.2s; min-width: 250px;}
+        .jeep-btn:hover { border-color: #00f2c3; background: #333; }
+
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
+    <!-- Login Modal -->
+    <div id="login-modal">
+        <h2>Select Your Jeepney</h2>
+        <p>Choose the vehicle you are currently driving:</p>
+        <div id="jeepney-list"></div>
+    </div>
+
+    <!-- Main Dashboard -->
     <div id="map-container">
-        <div id="driver-id">Driver: Select a Jeepney</div>
+        <div id="top-bar">
+            <div class="top-panel" id="driver-id">Driver: None</div>
+            <div class="top-panel">
+                Route: 
+                <select id="route-select" onchange="updateRoute()">
+                    <option value="UNASSIGNED">UNASSIGNED</option>
+                    <option value="AYALA">AYALA</option>
+                    <option value="SINNUNUC">SINNUNUC</option>
+                </select>
+            </div>
+        </div>
         <div id="map"></div>
     </div>
+    
     <div id="alert-area">
         <div id="alert-banner">🔔 PASSENGER WAITING NEARBY!</div>
         <button id="ack-btn" onclick="acknowledge()">✅ I SEE THEM</button>
@@ -34,20 +65,97 @@
         let driverMarker = null;
         let geofenceCircle = null;
         let selectedPlate = null;
+        let availableJeeps = {};
 
-        // Select which jeepney the driver is in
+        // Initialize Map
         function selectJeepney(plate) {
             selectedPlate = plate;
+            document.getElementById('login-modal').style.display = 'none';
             document.getElementById('driver-id').innerText = `Driver: ${plate}`;
-            map.setView([6.9273, 122.0588], 16); // Reset view
+            
+            // Set the dropdown to the jeepney's current route
+            if(availableJeeps[plate]) {
+                document.getElementById('route-select').value = availableJeeps[plate].route;
+            }
+
+            // Unlock TTS on user interaction
+            if ('speechSynthesis' in window) {
+                let u = new SpeechSynthesisUtterance("Jeepney selected.");
+                window.speechSynthesis.speak(u);
+            }
         }
 
+        function updateRoute() {
+            if (!selectedPlate) return;
+            const newRoute = document.getElementById('route-select').value;
+            socket.emit('driver_update_route', { plate: selectedPlate, route: newRoute });
+            
+            if(availableJeeps[selectedPlate]) availableJeeps[selectedPlate].route = newRoute;
+        }
+
+        function updateJeepneyList() {
+            const listDiv = document.getElementById('jeepney-list');
+            listDiv.innerHTML = '';
+            let count = 0;
+
+            for (let plate in availableJeeps) {
+                count++;
+                const btn = document.createElement('button');
+                btn.className = 'jeep-btn';
+                btn.innerText = `${plate} (${availableJeeps[plate].route})`;
+                btn.onclick = () => selectJeepney(plate);
+                listDiv.appendChild(btn);
+            }
+
+            if (count === 0) {
+                listDiv.innerHTML = '<p style="color: #aaa;">Waiting for jeepneys to connect...</p>';
+            }
+        }
+
+        // --- Real-time Data Listeners ---
+        socket.on('initial_jeepneys', (data) => {
+            for (let plate in data) availableJeeps[plate] = data[plate];
+            updateJeepneyList();
+        });
+
+        socket.on('initial_test_jeepneys', (data) => {
+            for (let plate in data) availableJeeps[plate] = data[plate];
+            updateJeepneyList();
+        });
+
+        socket.on('jeepney_update', (data) => {
+            availableJeeps[data.plate] = data;
+            updateJeepneyList(); // Update list so route changes reflect
+            
+            if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
+        });
+
+        socket.on('test_jeepney_update', (data) => {
+            availableJeeps[data.plate] = data;
+            updateJeepneyList();
+            
+            if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
+        });
+
+        socket.on('test_jeepney_deleted', (plate) => {
+            delete availableJeeps[plate];
+            updateJeepneyList();
+            if (selectedPlate === plate) {
+                alert("The jeepney you were tracking was removed by the admin.");
+                location.reload();
+            }
+        });
+
         socket.on('driver_alert', (data) => {
+            if (data.plate !== selectedPlate) return; // Only alert if it's for THIS driver
+
             document.getElementById('alert-banner').style.display = 'block';
             document.getElementById('alert-banner').innerText = `🔔 ${data.message}`;
             document.getElementById('ack-btn').style.display = 'inline-block';
 
+            // TTS FIX: Cancel any stuck speech before speaking
             if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
                 const speech = new SpeechSynthesisUtterance(data.message);
                 speech.rate = 1; speech.pitch = 1;
                 window.speechSynthesis.speak(speech);
@@ -57,19 +165,6 @@
                 document.getElementById('alert-banner').style.display = 'none';
                 document.getElementById('ack-btn').style.display = 'none';
             }, 15000);
-        });
-
-        // Listen for updates to the selected jeepney
-        socket.on('jeepney_update', (data) => {
-            if (data.plate === selectedPlate) {
-                updateDriverMap(data.lat, data.lon);
-            }
-        });
-
-        socket.on('test_jeepney_update', (data) => {
-            if (data.plate === selectedPlate) {
-                updateDriverMap(data.lat, data.lon);
-            }
         });
 
         function updateDriverMap(lat, lon) {
