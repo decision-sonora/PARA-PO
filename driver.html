@@ -2,48 +2,64 @@
 <html>
 <head>
     <title>PARA-PO Driver Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: Arial; background: #1e1e2f; color: white; text-align: center; padding: 50px 20px; }
-        h1 { font-size: 32px; color: #00f2c3; }
-        #alert-box { display: none; background: #fd5d93; padding: 30px; border-radius: 15px; margin-top: 30px; animation: flash 1s infinite; }
-        .ack-btn { background: #00f2c3; color: #1e1e2f; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; margin-top: 20px; cursor: pointer; font-weight: bold; width: 100%; }
+        body { font-family: Arial; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e2f; }
+        #map { flex-grow: 1; }
+        #alert-banner { display: none; background: #fd5d93; color: white; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; animation: flash 1s infinite; z-index: 1000; }
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <h1>🚐 PARA-PO Driver</h1>
-    <p>Keep this screen open while driving. Voice alerts are enabled.</p>
-    
-    <div id="alert-box">
-        <h2>🔔 PASSENGER WAITING!</h2>
-        <p id="alert-msg"></p>
-        <button class="ack-btn" onclick="acknowledge()">✅ I SEE THEM</button>
-    </div>
+    <div id="alert-banner">🔔 PASSENGER WAITING NEARBY!</div>
+    <div id="map"></div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
         const socket = io();
-        let currentPingPlate = null;
+        let driverMarker = null;
+        let geofenceCircle = null;
 
         socket.on('driver_alert', (data) => {
-            currentPingPlate = data.plate;
-            document.getElementById('alert-box').style.display = 'block';
-            document.getElementById('alert-msg').innerText = data.message;
+            document.getElementById('alert-banner').innerText = `🔔 ${data.message}`;
+            document.getElementById('alert-banner').style.display = 'block';
 
+            // Hands-free voice alert
             if ('speechSynthesis' in window) {
-                const speech = new SpeechSynthesisUtterance("Attention driver. A passenger is waiting ahead.");
+                const speech = new SpeechSynthesisUtterance(data.message);
                 speech.rate = 1; speech.pitch = 1;
                 window.speechSynthesis.speak(speech);
             }
+
+            setTimeout(() => {
+                document.getElementById('alert-banner').style.display = 'none';
+            }, 10000);
         });
 
-        function acknowledge() {
-            if(currentPingPlate) {
-                socket.emit('driver_acknowledge', { plate: currentPingPlate });
-                document.getElementById('alert-box').style.display = 'none';
-                currentPingPlate = null;
+        // Listen for ESP32 data (Your driver device should also send its location here)
+        socket.on('jeepney_update', (data) => {
+            // Update the map center to follow the jeepney
+            map.setView([data.lat, data.lon], 16);
+
+            if (driverMarker) {
+                driverMarker.setLatLng([data.lat, data.lon]);
+            } else {
+                const icon = L.divIcon({ html: '🚐', iconSize: [40, 40], className: '' });
+                driverMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map);
             }
-        }
+
+            // Update the geofence circle
+            if (geofenceCircle) {
+                map.removeLayer(geofenceCircle);
+            }
+            geofenceCircle = L.circle([data.lat, data.lon], {
+                color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100
+            }).addTo(map);
+        });
     </script>
 </body>
 </html>
