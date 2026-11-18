@@ -7,7 +7,8 @@
     <style>
         :root {
             --bg-dark: #121212;
-            --panel-bg: #1e1e1e;
+            --panel-bg: rgba(30, 30, 30, 0.85);
+            --card-bg: #1e1e1e;
             --border-color: #333333;
             --text-primary: #ffffff;
             --text-secondary: #a0a0a0;
@@ -19,31 +20,38 @@
             font-family: 'Inter', sans-serif; 
             background: var(--bg-dark); 
             color: var(--text-primary); 
-            padding: 20px; 
-            display: flex; 
-            height: 100vh; 
-            box-sizing: border-box; 
+            padding: 0; 
             margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #map { 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            filter: brightness(0.85) contrast(1.1);
         }
 
         #sidebar { 
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            bottom: 20px;
             width: 360px; 
             padding: 24px; 
             display: flex; 
             flex-direction: column; 
             background: var(--panel-bg); 
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             border-radius: 16px; 
             border: 1px solid var(--border-color);
-            margin-right: 20px; 
-            overflow-y: auto;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
-
-        #map { 
-            flex-grow: 1; 
-            border-radius: 16px; 
-            border: 1px solid var(--border-color); 
-            filter: brightness(0.85) contrast(1.1);
+            z-index: 1000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
 
         h2 { margin-top: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;}
@@ -60,6 +68,7 @@
             border: 1px solid var(--border-color); 
             outline: none;
             font-weight: 500;
+            box-sizing: border-box;
         }
 
         p { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 8px; }
@@ -75,6 +84,7 @@
             font-weight: 600; 
             font-family: 'Inter', sans-serif; 
             transition: all 0.2s ease; 
+            box-sizing: border-box;
         }
 
         .btn-jeep { background: #2a2a2a; color: white; border: 1px solid #444; }
@@ -102,6 +112,22 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            #sidebar {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                height: 55vh;
+                border-radius: 20px 20px 0 0;
+                border-bottom: none;
+                border-left: none;
+                border-right: none;
+                padding: 15px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -129,7 +155,8 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map').setView([6.9273, 122.0588], 14);
+        const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 14);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const socket = io();
@@ -160,7 +187,6 @@
             document.getElementById('btn-pass').classList.remove('active-mode-red');
         });
 
-        // --- Road Routing Logic (OSRM API) ---
         async function getRoadRoute(startLat, startLon, endLat, endLon) {
             try {
                 const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&overview=full`);
