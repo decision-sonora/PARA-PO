@@ -3,42 +3,47 @@
 <head>
     <title>Admin - PARA-PO</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: Arial; background: #1e1e2f; color: white; padding: 20px; display: flex; height: 100vh; box-sizing: border-box; }
-        #sidebar { width: 340px; padding-right: 20px; display: flex; flex-direction: column; }
-        #map { flex-grow: 1; border-radius: 8px; border: 2px solid #00f2c3; }
-        button { width: 100%; padding: 12px; font-size: 14px; margin-bottom: 8px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .btn-jeep { background: #00f2c3; color: #1e1e2f; }
-        .btn-pass { background: #fd5d93; color: white; }
-        .btn-clear { background: #444; color: white; }
-        .active-mode { border: 3px solid white; box-shadow: 0 0 10px white; }
-        select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 16px; }
-        #status { margin: 10px 0; font-size: 14px; color: #00f2c3; font-weight: bold; min-height: 20px;}
-        .delete-list { flex-grow: 1; overflow-y: auto; margin-top: 15px; border-top: 1px solid #444; padding-top: 10px; }
-        .delete-item { display: flex; justify-content: space-between; align-items: center; background: #27293d; padding: 8px; margin-bottom: 5px; border-radius: 5px; font-size: 13px;}
-        .delete-btn { background: #fd5d93; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; width: auto; margin: 0;}
+        body { font-family: 'Lora', serif; background: radial-gradient(circle at 50% 50%, #1a0500 0%, #050000 100%); color: #e6d5c3; padding: 20px; display: flex; height: 100vh; box-sizing: border-box; margin: 0; background-image: radial-gradient(circle at 50% 50%, rgba(255, 80, 0, 0.1) 0%, transparent 60%), radial-gradient(#ffffff 1px, transparent 1px); background-size: 100% 100%, 30px 30px; }
+        #sidebar { width: 350px; padding: 25px; display: flex; flex-direction: column; background: rgba(20, 5, 0, 0.7); backdrop-filter: blur(12px); border-radius: 15px; box-shadow: 0 8px 32px rgba(255, 60, 0, 0.15); border: 1px solid rgba(255, 100, 50, 0.2); margin-right: 20px; overflow-y: auto;}
+        #map { flex-grow: 1; border-radius: 15px; border: 2px solid rgba(255, 80, 0, 0.4); box-shadow: 0 0 20px rgba(255, 60, 0, 0.2); }
+        h2 { font-family: 'Playfair Display', serif; color: #ff6b35; margin-top: 0; font-size: 28px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);}
+        button { width: 100%; padding: 14px; font-size: 15px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-family: 'Lora', serif; transition: all 0.3s ease; }
+        .btn-jeep { background: linear-gradient(135deg, #ff4d00, #cc3300); color: white; box-shadow: 0 4px 15px rgba(255, 60, 0, 0.3); }
+        .btn-jeep:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255, 60, 0, 0.5); }
+        .btn-pass { background: linear-gradient(135deg, #a60000, #ff0040); color: white; box-shadow: 0 4px 15px rgba(200, 0, 0, 0.3); }
+        .btn-pass:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(200, 0, 0, 0.5); }
+        .btn-clear { background: rgba(255, 255, 255, 0.1); color: #e6d5c3; border: 1px solid rgba(255,255,255,0.2); }
+        .btn-auto { background: linear-gradient(135deg, #ffaa00, #ff6600); color: #1a0500; box-shadow: 0 4px 15px rgba(255, 150, 0, 0.3); }
+        .active-mode { border: 2px solid #fff; box-shadow: 0 0 15px #fff; }
+        select { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-family: 'Lora', serif; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); outline: none;}
+        #status { margin: 15px 0; font-size: 14px; color: #ff8c66; font-weight: bold; min-height: 20px;}
+        .delete-list { flex-grow: 1; overflow-y: auto; margin-top: 15px; border-top: 1px solid rgba(255,100,0,0.2); padding-top: 10px; }
+        .delete-item { display: flex; justify-content: space-between; align-items: center; background: rgba(255, 60, 0, 0.1); padding: 10px; margin-bottom: 5px; border-radius: 8px; font-size: 14px; border: 1px solid rgba(255,100,0,0.1);}
+        .delete-btn { background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; width: auto; margin: 0; font-size: 12px;}
+        .delete-btn:hover { background: #ff0000; }
     </style>
 </head>
 <body>
     <div id="sidebar">
-        <h2>🛡️ Admin Hub</h2>
+        <h2>Admin Hub</h2>
         <select id="admin-route">
             <option value="AYALA">Ayala Route</option>
             <option value="SINNUNUC">Sinnunuc Route</option>
         </select>
 
-        <p style="margin-bottom: 5px;">1. Select mode:</p>
+        <p style="margin-bottom: 5px; font-weight: bold;">1. Select mode:</p>
         <button id="btn-jeep" class="btn-jeep" onclick="setMode('jeepney')">📍 Place Test Jeepney</button>
         <button id="btn-pass" class="btn-pass" onclick="setMode('passenger')">🧍 Place Test Passenger</button>
         
-        <p style="margin-bottom: 5px;">2. Click map to place.</p>
+        <p style="margin-bottom: 5px; font-weight: bold;">2. Click map to place.</p>
+        
+        <button id="btn-auto" class="btn-auto" onclick="toggleAutoMove()">🚦 Start Auto-Move (Follow Road)</button>
         <button class="btn-clear" onclick="socket.emit('admin_clear_all')">🗑️ Clear All</button>
 
         <p id="status">Status: Ready.</p>
-
-        <div class="delete-list" id="delete-list">
-            <!-- Items will appear here -->
-        </div>
+        <div class="delete-list" id="delete-list"></div>
     </div>
     <div id="map"></div>
 
@@ -51,6 +56,8 @@
         const socket = io();
         let currentMode = null;
         let markers = {}; 
+        let isAutoMoving = false;
+        let moveIntervals = {};
 
         function setMode(mode) {
             currentMode = mode;
@@ -63,25 +70,75 @@
 
         map.on('click', (e) => {
             if (!currentMode) return;
-
             if(currentMode === 'jeepney') {
-                socket.emit('admin_place_test_jeepney', { 
-                    lat: e.latlng.lat, 
-                    lon: e.latlng.lng, 
-                    route: document.getElementById('admin-route').value 
-                });
-            } 
-            else if (currentMode === 'passenger') {
+                socket.emit('admin_place_test_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng, route: document.getElementById('admin-route').value });
+            } else if (currentMode === 'passenger') {
                 socket.emit('admin_place_test_passenger', { lat: e.latlng.lat, lon: e.latlng.lng });
             }
-            
             currentMode = null;
             document.getElementById('status').innerText = "Status: Placed successfully!";
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
         });
 
-        // Helper to draw the marker
+        // --- Road Routing Logic (OSRM API) ---
+        async function getRoadRoute(startLat, startLon, endLat, endLon) {
+            try {
+                const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&overview=full`);
+                const data = await res.json();
+                if(data.routes && data.routes.length > 0) {
+                    return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); // Convert [lon, lat] to [lat, lon]
+                }
+            } catch(e) { console.error("Routing error", e); }
+            return [[startLat, startLon], [endLat, endLon]]; // Fallback to straight line
+        }
+
+        function toggleAutoMove() {
+            isAutoMoving = !isAutoMoving;
+            const btn = document.getElementById('btn-auto');
+            if (isAutoMoving) {
+                btn.innerText = "🛑 Stop Auto-Move";
+                btn.style.background = "linear-gradient(135deg, #cc0000, #990000)";
+                document.getElementById('status').innerText = "Auto-Move Active. Jeepneys will drive to pinged passengers.";
+            } else {
+                btn.innerText = "🚦 Start Auto-Move (Follow Road)";
+                btn.style.background = "";
+                document.getElementById('status').innerText = "Auto-Move Stopped.";
+                for(let plate in moveIntervals) { clearInterval(moveIntervals[plate]); }
+                moveIntervals = {};
+            }
+        }
+
+        // Listen for passenger pings to trigger auto-routing
+        socket.on('admin_route_to_passenger', async (data) => {
+            if (!isAutoMoving) return;
+            const plate = data.plate;
+            if (markers[plate]) {
+                document.getElementById('status').innerText = `Routing ${plate} to passenger...`;
+                const start = markers[plate].getLatLng();
+                
+                // Get road path
+                const routePath = await getRoadRoute(start.lat, start.lng, data.passLat, data.passLon);
+                let step = 0;
+
+                if (moveIntervals[plate]) clearInterval(moveIntervals[plate]);
+                
+                // Move along the path
+                moveIntervals[plate] = setInterval(() => {
+                    if (!isAutoMoving || step >= routePath.length) {
+                        clearInterval(moveIntervals[plate]);
+                        delete moveIntervals[plate];
+                        return;
+                    }
+                    const newPos = routePath[step];
+                    markers[plate].setLatLng(newPos);
+                    socket.emit('admin_move_test_jeepney', { plate: plate, lat: newPos[0], lon: newPos[1] });
+                    step++;
+                }, 500); // 500ms per coordinate step
+            }
+        });
+
+        // --- Rendering ---
         function createJeepMarker(data) {
             if (markers[data.plate]) return;
             const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
@@ -89,10 +146,7 @@
             
             marker.on('dragend', (e) => {
                 const newPos = e.target.getLatLng();
-                // setTimeout prevents event clashes with map click
-                setTimeout(() => {
-                    socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng });
-                }, 50);
+                setTimeout(() => { socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng }); }, 50);
             });
             
             markers[data.plate] = marker;
@@ -106,40 +160,21 @@
             updateDeleteList();
         }
 
-        // --- Initial Load (Fixes Refresh Issue) ---
-        socket.on('initial_test_jeepneys', (data) => {
-            for (let plate in data) createJeepMarker(data[plate]);
-        });
+        socket.on('initial_test_jeepneys', (data) => { for (let plate in data) createJeepMarker(data[plate]); });
+        socket.on('initial_test_passengers', (data) => { for (let id in data) createPassengerMarker(data[id]); });
 
-        socket.on('initial_test_passengers', (data) => {
-            for (let id in data) createPassengerMarker(data[id]);
-        });
-
-        // --- Live Updates ---
         socket.on('test_jeepney_update', (data) => {
-            if (!markers[data.plate]) {
-                createJeepMarker(data);
-            } else {
-                markers[data.plate].setLatLng([data.lat, data.lon]);
-            }
+            if (!markers[data.plate]) createJeepMarker(data);
+            else if (!moveIntervals[data.plate]) markers[data.plate].setLatLng([data.lat, data.lon]);
         });
 
-        socket.on('test_passenger_update', (data) => {
-            if (!markers[data.id]) createPassengerMarker(data);
-        });
+        socket.on('test_passenger_update', (data) => { if (!markers[data.id]) createPassengerMarker(data); });
 
-        socket.on('test_jeepney_deleted', (plate) => {
-            if(markers[plate]) { map.removeLayer(markers[plate]); delete markers[plate]; updateDeleteList(); }
-        });
-
-        socket.on('test_passenger_deleted', (id) => {
-            if(markers[id]) { map.removeLayer(markers[id]); delete markers[id]; updateDeleteList(); }
-        });
-
+        socket.on('test_jeepney_deleted', (plate) => { if(markers[plate]) { map.removeLayer(markers[plate]); delete markers[plate]; updateDeleteList(); } });
+        socket.on('test_passenger_deleted', (id) => { if(markers[id]) { map.removeLayer(markers[id]); delete markers[id]; updateDeleteList(); } });
         socket.on('clear_all_test_objects', () => {
             for(let id in markers) map.removeLayer(markers[id]);
-            markers = {};
-            updateDeleteList();
+            markers = {}; updateDeleteList();
             document.getElementById('status').innerText = "Status: Cleared all.";
         });
 
