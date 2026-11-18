@@ -26,14 +26,16 @@ app.post('/api/ask-ai', async (req, res) => {
         if (!userMessage) return res.status(400).json({ error: "Message required" });
         if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: "GROQ_API_KEY missing in Render." });
 
-        // UPDATED SYSTEM PROMPT WITH EXACT FARE RULES
         const systemPrompt = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. 
+        
+        RULES:
+        1. DO NOT use markdown formatting (no asterisks like **, no hashtags, no bold). Use plain text only.
+        2. Use these Zamboanga City locations as your geographic reference: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca.
+        3. If asked for a distance between two places, estimate it based on real-world geography of these locations.
         
         Fare Rules:
         - Traditional Jeepneys: Minimum fare is PHP 14 for the first four kilometers, with an additional PHP 2 for every succeeding kilometer.
-        - Modern Jeepneys: Minimum fare is PHP 17 for the first four kilometers, with an additional PHP 2.40 for every succeeding kilometer.
-        
-        Popular routes: Ayala, Sinnunuc.`;
+        - Modern Jeepneys: Minimum fare is PHP 17 for the first four kilometers, with an additional PHP 2.40 for every succeeding kilometer.`;
 
         const completion = await groq.chat.completions.create({
             model: "openai/gpt-oss-120b", 
@@ -43,7 +45,10 @@ app.post('/api/ask-ai', async (req, res) => {
             ],
         });
 
-        res.json({ reply: completion.choices[0].message.content });
+        // Strip any accidental markdown asterisks just to be safe
+        let aiReply = completion.choices[0].message.content.replace(/\*\*/g, '');
+        
+        res.json({ reply: aiReply });
     } catch (error) {
         res.status(500).json({ error: "AI Error: " + error.message }); 
     }
@@ -78,6 +83,11 @@ io.on('connection', (socket) => {
     socket.emit('initial_jeepneys', activeJeepneys);
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
+
+    // --- PASSENGER: Broadcast Location (For Driver Maps) ---
+    socket.on('passenger_location_update', (data) => {
+        io.emit('passenger_location_update', { lat: data.lat, lon: data.lon });
+    });
 
     // --- DRIVER: Update Route ---
     socket.on('driver_update_route', (data) => {
