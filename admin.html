@@ -5,15 +5,15 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { font-family: Arial; background: #1e1e2f; color: white; padding: 20px; display: flex; height: 100vh; box-sizing: border-box; }
-        #sidebar { width: 320px; padding-right: 20px; display: flex; flex-direction: column; }
+        #sidebar { width: 340px; padding-right: 20px; display: flex; flex-direction: column; }
         #map { flex-grow: 1; border-radius: 8px; border: 2px solid #00f2c3; }
         button { width: 100%; padding: 12px; font-size: 14px; margin-bottom: 8px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
         .btn-jeep { background: #00f2c3; color: #1e1e2f; }
         .btn-pass { background: #fd5d93; color: white; }
         .btn-clear { background: #444; color: white; }
-        .active-mode { border: 3px solid white; }
-        select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
-        #status { margin-top: 10px; font-size: 13px; color: #aaa; }
+        .active-mode { border: 3px solid white; box-shadow: 0 0 10px white; }
+        select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 16px; }
+        #status { margin: 10px 0; font-size: 14px; color: #00f2c3; font-weight: bold; min-height: 20px;}
         .delete-list { flex-grow: 1; overflow-y: auto; margin-top: 15px; border-top: 1px solid #444; padding-top: 10px; }
         .delete-item { display: flex; justify-content: space-between; align-items: center; background: #27293d; padding: 8px; margin-bottom: 5px; border-radius: 5px; font-size: 13px;}
         .delete-btn { background: #fd5d93; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; width: auto; margin: 0;}
@@ -27,12 +27,14 @@
             <option value="SINNUNUC">Sinnunuc Route</option>
         </select>
 
-        <p>Select mode, then click map:</p>
+        <p style="margin-bottom: 5px;">1. Select mode:</p>
         <button id="btn-jeep" class="btn-jeep" onclick="setMode('jeepney')">📍 Place Test Jeepney</button>
         <button id="btn-pass" class="btn-pass" onclick="setMode('passenger')">🧍 Place Test Passenger</button>
+        
+        <p style="margin-bottom: 5px;">2. Click map to place.</p>
         <button class="btn-clear" onclick="socket.emit('admin_clear_all')">🗑️ Clear All</button>
 
-        <p id="status">Mode: None selected.</p>
+        <p id="status">Status: Ready.</p>
 
         <div class="delete-list" id="delete-list">
             <!-- Items will appear here -->
@@ -48,38 +50,47 @@
 
         const socket = io();
         let currentMode = null;
-        let markers = {}; // Store all admin markers
+        let markers = {}; 
 
         function setMode(mode) {
             currentMode = mode;
-            document.getElementById('status').innerText = "Mode: Click on the map to place the " + mode;
+            document.getElementById('status').innerText = `Mode: Click map to place ${mode}`;
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
             if(mode === 'jeepney') document.getElementById('btn-jeep').classList.add('active-mode');
             if(mode === 'passenger') document.getElementById('btn-pass').classList.add('active-mode');
         }
 
+        // Robust click handler
         map.on('click', (e) => {
+            if (!currentMode) {
+                alert("Please click a button above to select what you want to place.");
+                return;
+            }
+
             if(currentMode === 'jeepney') {
-                socket.emit('admin_place_test_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng, route: document.getElementById('admin-route').value });
-                document.getElementById('status').innerText = "Test Jeepney placed!";
+                socket.emit('admin_place_test_jeepney', { 
+                    lat: e.latlng.lat, 
+                    lon: e.latlng.lng, 
+                    route: document.getElementById('admin-route').value 
+                });
             } 
             else if (currentMode === 'passenger') {
                 socket.emit('admin_place_test_passenger', { lat: e.latlng.lat, lon: e.latlng.lng });
-                document.getElementById('status').innerText = "Test Passenger placed!";
             }
+            
+            // Reset mode after placing
             currentMode = null;
+            document.getElementById('status').innerText = "Status: Placed successfully!";
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
         });
 
-        // --- Update Admin Map and Delete List ---
         socket.on('test_jeepney_update', (data) => {
             if (!markers[data.plate]) {
                 const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
                 const marker = L.marker([data.lat, data.lon], {icon: icon, draggable: true}).addTo(map).bindPopup(`Test Jeep: ${data.plate}`);
                 
-                // Allow dragging to move the jeepney
                 marker.on('dragend', (e) => {
                     const newPos = e.target.getLatLng();
                     socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng });
@@ -88,7 +99,6 @@
                 markers[data.plate] = marker;
                 updateDeleteList();
             } else {
-                // Update marker position if moved remotely
                 markers[data.plate].setLatLng([data.lat, data.lon]);
             }
         });
@@ -113,6 +123,7 @@
             for(let id in markers) map.removeLayer(markers[id]);
             markers = {};
             updateDeleteList();
+            document.getElementById('status').innerText = "Status: Cleared all.";
         });
 
         function updateDeleteList() {
