@@ -5,28 +5,29 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { font-family: Arial; background: #1e1e2f; color: white; padding: 20px; display: flex; height: 100vh; box-sizing: border-box; }
-        #sidebar { width: 300px; padding-right: 20px; }
+        #sidebar { width: 320px; padding-right: 20px; }
         #map { flex-grow: 1; border-radius: 8px; border: 2px solid #00f2c3; }
         button { width: 100%; padding: 15px; font-size: 16px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
         .btn-jeep { background: #00f2c3; color: #1e1e2f; }
         .btn-pass { background: #fd5d93; color: white; }
-        .btn-clear { background: #444; color: white; }
         .active-mode { border: 3px solid white; }
-        #status { margin-top: 20px; font-size: 14px; color: #aaa; }
+        select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
     </style>
 </head>
 <body>
     <div id="sidebar">
-        <h2>🛡️ Admin Control</h2>
-        <p>Select a mode, then click on the map to place them.</p>
+        <h2>🛡️ Admin Hub</h2>
         
+        <select id="admin-route">
+            <option value="AYALA">Ayala Route</option>
+            <option value="SINNUNUC">Sinnunuc Route</option>
+        </select>
+
+        <p>Select mode, then click map:</p>
         <button id="btn-jeep" class="btn-jeep" onclick="setMode('jeepney')">📍 Place Test Jeepney</button>
         <button id="btn-pass" class="btn-pass" onclick="setMode('passenger')">🧍 Place Test Passenger</button>
         
-        <hr style="border-color: #444; margin: 20px 0;">
-        <button class="btn-clear" onclick="clearAll()">🛑 Remove Test Jeepney</button>
-
-        <p id="status">Mode: None selected. Click a button above.</p>
+        <p id="status" style="margin-top:20px; font-size:14px; color:#aaa;">Mode: None selected.</p>
     </div>
     <div id="map"></div>
 
@@ -46,7 +47,6 @@
             document.getElementById('status').innerText = "Mode: Click on the map to place the " + mode;
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
-            
             if(mode === 'jeepney') document.getElementById('btn-jeep').classList.add('active-mode');
             if(mode === 'passenger') document.getElementById('btn-pass').classList.add('active-mode');
         }
@@ -56,7 +56,8 @@
                 if(jeepMarker) map.removeLayer(jeepMarker);
                 const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
                 jeepMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: icon}).addTo(map);
-                socket.emit('admin_place_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng });
+                const route = document.getElementById('admin-route').value;
+                socket.emit('admin_place_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng, route: route });
                 document.getElementById('status').innerText = "Test Jeepney placed!";
             } 
             else if (currentMode === 'passenger') {
@@ -70,13 +71,6 @@
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
         });
-
-        function clearAll() {
-            if(jeepMarker) { map.removeLayer(jeepMarker); jeepMarker = null; }
-            if(passMarker) { map.remove(passMarker); passMarker = null; }
-            socket.emit('admin_remove_jeepney');
-            document.getElementById('status').innerText = "Cleared.";
-        }
     </script>
 </body>
 </html>
