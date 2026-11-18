@@ -30,11 +30,9 @@
             document.getElementById('alert-box').style.display = 'block';
             document.getElementById('alert-msg').innerText = data.message;
 
-            // Voice Synthesis (Hands-free alert)
             if ('speechSynthesis' in window) {
                 const speech = new SpeechSynthesisUtterance("Attention driver. A passenger is waiting ahead.");
-                speech.rate = 1;
-                speech.pitch = 1;
+                speech.rate = 1; speech.pitch = 1;
                 window.speechSynthesis.speak(speech);
             }
         });
