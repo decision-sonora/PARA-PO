@@ -61,7 +61,7 @@ app.get('/admin-secret-2026', (req, res) => res.sendFile(path.join(__dirname, 'a
 let activeJeepneys = {}; 
 let testJeepneys = {}; 
 let testPassengers = {}; 
-let jeepneyStatus = {}; // Tracks capacity per jeepney
+let jeepneyStatus = {}; 
 
 app.post('/api/update', (req, res) => {
     const data = req.body;
@@ -97,20 +97,31 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('update_capacity', (data) => {
-        if (!jeepneyStatus[data.plate]) {
-            jeepneyStatus[data.plate] = { count: 0, max: 20, isFull: false };
-        }
-        jeepneyStatus[data.plate].count = data.count;
-        jeepneyStatus[data.plate].isFull = data.count >= jeepneyStatus[data.plate].max;
-        io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
-    });
-
     socket.on('toggle_full', (data) => {
         if (jeepneyStatus[data.plate]) {
             jeepneyStatus[data.plate].isFull = data.isFull;
             io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
         }
+    });
+
+    // --- PASSENGER: Clicked "I Have Boarded" ---
+    socket.on('passenger_board', (data) => {
+        const plate = data.plate;
+        if (!jeepneyStatus[plate]) {
+            jeepneyStatus[plate] = { count: 0, max: 20, isFull: false };
+        }
+        
+        // Automatically add +1 to the capacity
+        if (jeepneyStatus[plate].count < jeepneyStatus[plate].max) {
+            jeepneyStatus[plate].count += 1;
+        }
+        
+        // Check if it hits max
+        if (jeepneyStatus[plate].count >= jeepneyStatus[plate].max) {
+            jeepneyStatus[plate].isFull = true;
+        }
+        
+        io.emit('status_update', { plate: plate, status: jeepneyStatus[plate] });
     });
 
     // --- ADMIN: Place Test Jeepney ---
