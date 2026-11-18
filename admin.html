@@ -61,12 +61,8 @@
             if(mode === 'passenger') document.getElementById('btn-pass').classList.add('active-mode');
         }
 
-        // Robust click handler
         map.on('click', (e) => {
-            if (!currentMode) {
-                alert("Please click a button above to select what you want to place.");
-                return;
-            }
+            if (!currentMode) return;
 
             if(currentMode === 'jeepney') {
                 socket.emit('admin_place_test_jeepney', { 
@@ -79,36 +75,57 @@
                 socket.emit('admin_place_test_passenger', { lat: e.latlng.lat, lon: e.latlng.lng });
             }
             
-            // Reset mode after placing
             currentMode = null;
             document.getElementById('status').innerText = "Status: Placed successfully!";
             document.getElementById('btn-jeep').classList.remove('active-mode');
             document.getElementById('btn-pass').classList.remove('active-mode');
         });
 
+        // Helper to draw the marker
+        function createJeepMarker(data) {
+            if (markers[data.plate]) return;
+            const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
+            const marker = L.marker([data.lat, data.lon], {icon: icon, draggable: true}).addTo(map).bindPopup(`Test Jeep: ${data.plate}`);
+            
+            marker.on('dragend', (e) => {
+                const newPos = e.target.getLatLng();
+                // setTimeout prevents event clashes with map click
+                setTimeout(() => {
+                    socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng });
+                }, 50);
+            });
+            
+            markers[data.plate] = marker;
+            updateDeleteList();
+        }
+
+        function createPassengerMarker(data) {
+            if (markers[data.id]) return;
+            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+            markers[data.id] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(`Test Passenger: ${data.id}`);
+            updateDeleteList();
+        }
+
+        // --- Initial Load (Fixes Refresh Issue) ---
+        socket.on('initial_test_jeepneys', (data) => {
+            for (let plate in data) createJeepMarker(data[plate]);
+        });
+
+        socket.on('initial_test_passengers', (data) => {
+            for (let id in data) createPassengerMarker(data[id]);
+        });
+
+        // --- Live Updates ---
         socket.on('test_jeepney_update', (data) => {
             if (!markers[data.plate]) {
-                const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
-                const marker = L.marker([data.lat, data.lon], {icon: icon, draggable: true}).addTo(map).bindPopup(`Test Jeep: ${data.plate}`);
-                
-                marker.on('dragend', (e) => {
-                    const newPos = e.target.getLatLng();
-                    socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng });
-                });
-                
-                markers[data.plate] = marker;
-                updateDeleteList();
+                createJeepMarker(data);
             } else {
                 markers[data.plate].setLatLng([data.lat, data.lon]);
             }
         });
 
         socket.on('test_passenger_update', (data) => {
-            if (!markers[data.id]) {
-                const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-                markers[data.id] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(`Test Passenger: ${data.id}`);
-                updateDeleteList();
-            }
+            if (!markers[data.id]) createPassengerMarker(data);
         });
 
         socket.on('test_jeepney_deleted', (plate) => {
