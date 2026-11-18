@@ -27,22 +27,16 @@ app.post('/api/ask-ai', async (req, res) => {
         if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: "GROQ_API_KEY missing in Render." });
 
         const systemPrompt = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. 
-        
         RULES:
         1. DO NOT use markdown formatting (no asterisks like **, no hashtags, no bold). Use plain text only.
-        2. Use these Zamboanga City locations as your geographic reference: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca.
-        3. If asked for a distance between two places, estimate it based on real-world geography of these locations.
-        
+        2. Use these Zamboanga City locations: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca.
         Fare Rules:
-        - Traditional Jeepneys: Minimum fare is PHP 14 for the first four kilometers, with an additional PHP 2 for every succeeding kilometer.
-        - Modern Jeepneys: Minimum fare is PHP 17 for the first four kilometers, with an additional PHP 2.40 for every succeeding kilometer.`;
+        - Traditional Jeepneys: Minimum PHP 14 for first 4km, +PHP 2 per succeeding km.
+        - Modern Jeepneys: Minimum PHP 17 for first 4km, +PHP 2.40 per succeeding km.`;
 
         const completion = await groq.chat.completions.create({
             model: "openai/gpt-oss-120b", 
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userMessage }
-            ],
+            messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
         });
 
         let aiReply = completion.choices[0].message.content.replace(/\*\*/g, '');
@@ -62,6 +56,7 @@ let activeJeepneys = {};
 let testJeepneys = {}; 
 let testPassengers = {}; 
 let jeepneyStatus = {}; 
+let activePings = {}; // Tracks which passenger pinged which jeepney
 
 app.post('/api/update', (req, res) => {
     const data = req.body;
@@ -84,16 +79,14 @@ io.on('connection', (socket) => {
     socket.emit('initial_test_passengers', testPassengers);
     socket.emit('initial_status', jeepneyStatus);
 
-    // --- DRIVER: Update Route & Status ---
     socket.on('driver_update_route', (data) => {
-        const plate = data.plate;
-        if (activeJeepneys[plate]) {
-            activeJeepneys[plate].route = data.route;
-            io.emit('jeepney_update', activeJeepneys[plate]);
+        if (activeJeepneys[data.plate]) {
+            activeJeepneys[data.plate].route = data.route;
+            io.emit('jeepney_update', activeJeepneys[data.plate]);
         }
-        if (testJeepneys[plate]) {
-            testJeepneys[plate].route = data.route;
-            io.emit('test_jeepney_update', testJeepneys[plate]);
+        if (testJeepneys[data.plate]) {
+            testJeepneys[data.plate].route = data.route;
+            io.emit('test_jeepney_update', testJeepneys[data.plate]);
         }
     });
 
@@ -104,35 +97,21 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- PASSENGER: Boarded & Disembarked ---
     socket.on('passenger_board', (data) => {
-        const plate = data.plate;
-        if (!jeepneyStatus[plate]) {
-            jeepneyStatus[plate] = { count: 0, max: 20, isFull: false };
-        }
-        if (jeepneyStatus[plate].count < jeepneyStatus[plate].max) {
-            jeepneyStatus[plate].count += 1;
-        }
-        if (jeepneyStatus[plate].count >= jeepneyStatus[plate].max) {
-            jeepneyStatus[plate].isFull = true;
-        }
-        io.emit('status_update', { plate: plate, status: jeepneyStatus[plate] });
+        if (!jeepneyStatus[data.plate]) jeepneyStatus[data.plate] = { count: 0, max: 20, isFull: false };
+        if (jeepneyStatus[data.plate].count < jeepneyStatus[data.plate].max) jeepneyStatus[data.plate].count += 1;
+        if (jeepneyStatus[data.plate].count >= jeepneyStatus[data.plate].max) jeepneyStatus[data.plate].isFull = true;
+        io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
     });
 
     socket.on('passenger_disembark', (data) => {
-        const plate = data.plate;
-        if (jeepneyStatus[plate]) {
-            if (jeepneyStatus[plate].count > 0) {
-                jeepneyStatus[plate].count -= 1;
-            }
-            if (jeepneyStatus[plate].count < jeepneyStatus[plate].max) {
-                jeepneyStatus[plate].isFull = false;
-            }
-            io.emit('status_update', { plate: plate, status: jeepneyStatus[plate] });
+        if (jeepneyStatus[data.plate]) {
+            if (jeepneyStatus[data.plate].count > 0) jeepneyStatus[data.plate].count -= 1;
+            if (jeepneyStatus[data.plate].count < jeepneyStatus[data.plate].max) jeepneyStatus[data.plate].isFull = false;
+            io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
         }
     });
 
-    // --- ADMIN: Place Test Jeepney ---
     socket.on('admin_place_test_jeepney', (data) => {
         const plate = "TEST-" + Math.floor(Math.random() * 1000);
         testJeepneys[plate] = { plate: plate, route: data.route, lat: data.lat, lon: data.lon };
@@ -149,12 +128,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_delete_test_jeepney', (plate) => {
-        delete testJeepneys[plate];
-        delete jeepneyStatus[plate];
+        delete testJeepneys[plate]; delete jeepneyStatus[plate];
         io.emit('test_jeepney_deleted', plate);
     });
 
-    // --- ADMIN: Place Test Passenger ---
     socket.on('admin_place_test_passenger', (data) => {
         const id = "PASS-" + Math.floor(Math.random() * 1000);
         testPassengers[id] = { id: id, lat: data.lat, lon: data.lon };
@@ -167,12 +144,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_clear_all', () => {
-        testJeepneys = {};
-        testPassengers = {};
+        testJeepneys = {}; testPassengers = {};
         io.emit('clear_all_test_objects');
     });
 
-    // --- PASSENGER: Ping Specific Driver ---
+    // TARGETED PING
     socket.on('passenger_ping', (data) => {
         const requestedPlate = data.plate; 
         const allJeeps = { ...activeJeepneys, ...testJeepneys };
@@ -181,18 +157,24 @@ io.on('connection', (socket) => {
             const targetJeep = allJeeps[requestedPlate];
             const dist = getDistance(targetJeep.lat, targetJeep.lon, data.passLat, data.passLon);
             
-            io.emit('driver_alert', { 
-                plate: requestedPlate, 
-                message: `Passenger waiting ${Math.round(dist)} meters away!` 
-            });
+            // Store which socket pinged this jeepney
+            activePings[requestedPlate] = { socketId: socket.id, passLat: data.passLat, passLon: data.passLon };
+            
+            io.emit('driver_alert', { plate: requestedPlate, message: `Passenger waiting ${Math.round(dist)} meters away!` });
+            io.emit('admin_route_to_passenger', { plate: requestedPlate, passLat: data.passLat, passLon: data.passLon }); // Alert admin for auto-route
             socket.emit('ping_sent', { plate: requestedPlate, distance: dist });
         } else {
-            socket.emit('ping_sent', { error: "That jeepney is no longer active." });
+            socket.emit('ping_sent', { error: "Jeepney no longer active." });
         }
     });
 
     socket.on('driver_acknowledge', (data) => {
-        io.emit('ping_acknowledged', { plate: data.plate });
+        const ping = activePings[data.plate];
+        if (ping) {
+            // TARGETED REPLY: Only send to the passenger who pinged
+            io.to(ping.socketId).emit('ping_acknowledged', { plate: data.plate });
+            delete activePings[data.plate];
+        }
     });
 });
 
