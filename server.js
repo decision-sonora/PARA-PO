@@ -26,7 +26,7 @@ app.post('/api/ask-ai', async (req, res) => {
         const systemPrompt = "You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep your answers short and friendly. The base fare is PHP 13 and it is PHP 15 per kilometer. Popular routes are Ayala and Sinnunuc. If asked unrelated topics, steer back to commuting.";
 
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash", // UPDATED TO THE LATEST MODEL
+            model: "gemini-3.8-flash", // UPDATED MODEL NAME
             contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\nUser: " + userMessage }] }]
         });
         res.json({ reply: response.text });
