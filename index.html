@@ -13,7 +13,6 @@
         select { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 16px;}
         .sms-box { font-size: 12px; color: #aaa; margin-top: 10px; text-align: center; }
         
-        /* Chatbot Styles */
         #chat-container { position: absolute; bottom: 20px; right: 20px; width: 320px; background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); display: flex; flex-direction: column; z-index: 2000; overflow: hidden; }
         #chat-header { background: #1e1e2f; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; }
         #chat-messages { height: 300px; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #f9f9f9; }
@@ -42,7 +41,6 @@
     </div>
     <div id="map"></div>
 
-    <!-- Chatbot UI -->
     <div id="chat-container">
         <div id="chat-header">
             <span>🤖 PARA-PO AI Assistant</span>
@@ -68,7 +66,6 @@
         let passengerLatLng = null;
         const socket = io();
 
-        // Handle incoming GPS data
         socket.on('jeepney_update', (data) => {
             activeData[data.plate] = data;
             if (markers[data.plate]) {
@@ -117,7 +114,6 @@
             for (let plate in activeData) {
                 const jLat = activeData[plate].lat;
                 const jLon = activeData[plate].lon;
-                // Simple distance check for 100m geofence
                 const R = 6371000; 
                 const dLat = (jLat - passengerLatLng[0]) * Math.PI / 180;
                 const dLon = (jLon - passengerLatLng[1]) * Math.PI / 180;
@@ -133,7 +129,6 @@
             alert("Ping sent to driver!");
         }
 
-        // ==================== AI CHATBOT ====================
         function handleEnter(e) { if (e.key === 'Enter') sendMessage(); }
 
         async function sendMessage() {
