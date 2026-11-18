@@ -9,9 +9,12 @@
         #map { flex-grow: 1; }
         .card { background: #27293d; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 4px solid #00f2c3; }
         .ping-btn { background: #fd5d93; color: white; border: none; padding: 8px; width: 100%; border-radius: 5px; cursor: pointer; margin-top: 10px; font-weight: bold;}
-        #alert-box { display: none; background: #00f2c3; color: #1e1e2f; padding: 15px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; animation: pulse 1.5s infinite; }
         
-        /* Location Controls */
+        /* Boarding Button */
+        #board-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 15px; width: 100%; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 18px; margin-top: 15px; animation: pulse 1s infinite; }
+        
+        #alert-box { display: none; background: #00f2c3; color: #1e1e2f; padding: 15px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
+        
         .loc-btn { background: #27293d; color: white; border: 1px solid #00f2c3; padding: 10px; border-radius: 5px; cursor: pointer; flex: 1; margin: 0 5px; font-size: 12px;}
         .loc-btn:hover { background: #00f2c3; color: #1e1e2f; }
         #search-container { display: flex; margin-bottom: 10px; }
@@ -19,7 +22,6 @@
         #search-btn { background: #00f2c3; color: #1e1e2f; border: none; padding: 10px 15px; border-radius: 0 5px 5px 0; cursor: pointer; font-weight: bold; }
         .loc-controls { display: flex; margin-bottom: 15px; }
         
-        /* Chatbot */
         #chat-toggle { position: absolute; bottom: 20px; right: 20px; background: #1e1e2f; color: white; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 30px; cursor: pointer; z-index: 3000; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
         #chat-container { display: none; position: absolute; bottom: 90px; right: 20px; width: 320px; background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); flex-direction: column; z-index: 2000; overflow: hidden; }
         #chat-header { background: #1e1e2f; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; }
@@ -30,7 +32,7 @@
         #chat-input-area { display: flex; padding: 10px; border-top: 1px solid #ccc; background: white; }
         #chat-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; outline: none; }
         #send-btn { background: #1e1e2f; color: white; border: none; padding: 10px 15px; margin-left: 10px; border-radius: 20px; cursor: pointer; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
@@ -49,6 +51,9 @@
 
         <div id="alert-box">🚨 Jeepney is nearby! Look outside!</div>
         <div id="jeepney-list" style="flex-grow:1; overflow-y: auto;">Searching...</div>
+        
+        <!-- Boarding Button -->
+        <button id="board-btn" onclick="confirmBoard()">✅ I Have Boarded</button>
     </div>
     <div id="map"></div>
 
@@ -78,8 +83,13 @@
         const geofences = {};
         let activeData = {}; 
         let passengerLatLng = null;
-        let myMarker = null; // Only I can see my marker
+        let myMarker = null; 
         let manualMode = false;
+        
+        let activePingPlate = null; // Tracks which jeepney we are pinging
+        let pingLine = null;        // The live tracking line
+        let currentJeepPos = null;  // Live position of the targeted jeepney
+
         const socket = io();
 
         // --- Private Location System ---
@@ -94,14 +104,13 @@
         }
 
         function autoLocate() {
-            if (!navigator.geolocation) return alert("Geolocation not supported by your browser.");
+            if (!navigator.geolocation) return alert("Geolocation not supported.");
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
                     setMyLocation(pos.coords.latitude, pos.coords.longitude);
                     map.setView([pos.coords.latitude, pos.coords.longitude], 16);
-                    alert("Location found!");
                 },
-                (err) => alert("Could not get location. Please use the manual click mode.")
+                (err) => alert("Could not get location. Please use click map.")
             );
         }
 
@@ -109,7 +118,6 @@
             manualMode = true;
             document.getElementById('manual-btn').style.background = "#00f2c3";
             document.getElementById('manual-btn').style.color = "#1e1e2f";
-            alert("Click anywhere on the map to set your location.");
         }
 
         map.on('click', (e) => {
@@ -140,29 +148,52 @@
             } catch (err) { alert("Error searching."); }
         }
 
+        // --- Ping & Tracking System ---
+        function pingDriver(plate) {
+            if(!passengerLatLng) return alert("Please set your location first.");
+            
+            activePingPlate = plate;
+            currentJeepPos = [activeData[plate].lat, activeData[plate].lon];
+            
+            socket.emit('passenger_ping', { plate: plate, passLat: passengerLatLng[0], passLon: passengerLatLng[1] });
+            
+            // Draw live tracking line
+            if (pingLine) map.removeLayer(pingLine);
+            pingLine = L.polyline([passengerLatLng, currentJeepPos], {color: '#fd5d93', weight: 4, dashArray: '10, 10'}).addTo(map);
+            updateLineDistance();
+
+            // Show the Board Button
+            document.getElementById('board-btn').style.display = 'block';
+        }
+
+        function updateLineDistance() {
+            if(!pingLine || !passengerLatLng || !currentJeepPos) return;
+            const dist = map.distance(passengerLatLng, currentJeepPos);
+            pingLine.bindTooltip(`${Math.round(dist)} meters away`, {permanent: true, direction: "center", className: "dist-tooltip"}).openTooltip();
+        }
+
+        function confirmBoard() {
+            if(!activePingPlate) return;
+            socket.emit('passenger_board', { plate: activePingPlate });
+            alert("You have boarded the jeepney! The driver's capacity has been updated.");
+            
+            // Cleanup tracking
+            if(pingLine) map.removeLayer(pingLine);
+            pingLine = null;
+            activePingPlate = null;
+            document.getElementById('board-btn').style.display = 'none';
+        }
+
         // --- Real-time Listeners ---
         socket.on('initial_jeepneys', (data) => { for (let plate in data) handleJeepneyUpdate(data[plate]); });
         socket.on('jeepney_update', (data) => handleJeepneyUpdate(data));
-
-        socket.on('test_jeepney_update', (data) => {
-            activeData[data.plate] = data; 
-            if (markers[data.plate]) markers[data.plate].setLatLng([data.lat, data.lon]);
-            else {
-                const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
-                markers[data.plate] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(`Test Jeep: ${data.plate}`);
-            }
-            if (geofences[data.plate]) map.removeLayer(geofences[data.plate]);
-            geofences[data.plate] = L.circle([data.lat, data.lon], { color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100 }).addTo(map);
-            renderSidebar();
-            checkGeofence();
-        });
+        socket.on('test_jeepney_update', (data) => handleJeepneyUpdate(data));
 
         socket.on('test_jeepney_deleted', (plate) => {
             if (markers[plate]) map.removeLayer(markers[plate]);
             if (geofences[plate]) map.removeLayer(geofences[plate]);
             delete markers[plate]; delete geofences[plate]; delete activeData[plate];
             renderSidebar();
-            checkGeofence();
         });
 
         socket.on('ping_acknowledged', (data) => {
@@ -178,6 +209,16 @@
             }
             if (geofences[data.plate]) map.removeLayer(geofences[data.plate]);
             geofences[data.plate] = L.circle([data.lat, data.lon], { color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100 }).addTo(map);
+            
+            // If this is the jeepney we are tracking, update the line
+            if (data.plate === activePingPlate) {
+                currentJeepPos = [data.lat, data.lon];
+                if (pingLine) {
+                    pingLine.setLatLngs([passengerLatLng, currentJeepPos]);
+                    updateLineDistance();
+                }
+            }
+            
             renderSidebar();
             checkGeofence();
         }
@@ -199,22 +240,10 @@
             if (!passengerLatLng) return;
             let nearby = false;
             for (let plate in activeData) {
-                const jLat = activeData[plate].lat;
-                const jLon = activeData[plate].lon;
-                const R = 6371000; 
-                const dLat = (jLat - passengerLatLng[0]) * Math.PI / 180;
-                const dLon = (jLon - passengerLatLng[1]) * Math.PI / 180;
-                const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(passengerLatLng[0] * Math.PI / 180) * Math.cos(jLat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-                const dist = R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+                const dist = map.distance(passengerLatLng, [activeData[plate].lat, activeData[plate].lon]);
                 if (dist <= 100) nearby = true;
             }
             document.getElementById('alert-box').style.display = nearby ? 'block' : 'none';
-        }
-
-        function pingDriver(plate) {
-            if(!passengerLatLng) return alert("Please set your location first (Auto or Click Map).");
-            socket.emit('passenger_ping', { plate: plate, passLat: passengerLatLng[0], passLon: passengerLatLng[1] });
-            alert("Ping sent to driver!");
         }
 
         // ==================== CHATBOT ====================
