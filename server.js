@@ -45,9 +45,7 @@ app.post('/api/ask-ai', async (req, res) => {
             ],
         });
 
-        // Strip any accidental markdown asterisks just to be safe
         let aiReply = completion.choices[0].message.content.replace(/\*\*/g, '');
-        
         res.json({ reply: aiReply });
     } catch (error) {
         res.status(500).json({ error: "AI Error: " + error.message }); 
@@ -84,7 +82,7 @@ io.on('connection', (socket) => {
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
 
-    // --- PASSENGER: Broadcast Location (For Driver Maps) ---
+    // --- PASSENGER: Broadcast Location ---
     socket.on('passenger_location_update', (data) => {
         io.emit('passenger_location_update', { lat: data.lat, lon: data.lon });
     });
@@ -142,29 +140,24 @@ io.on('connection', (socket) => {
         io.emit('clear_all_test_objects');
     });
 
-    // --- PASSENGER: Ping Driver ---
+    // --- PASSENGER: Ping Specific Driver (FIXED) ---
     socket.on('passenger_ping', (data) => {
-        let closestJeep = null;
-        let minDistance = Infinity;
-
+        const requestedPlate = data.plate; // The exact jeepney the passenger clicked
         const allJeeps = { ...activeJeepneys, ...testJeepneys };
-        for (let plate in allJeeps) {
-            const jeep = allJeeps[plate];
-            const dist = getDistance(jeep.lat, jeep.lon, data.passLat, data.passLon);
-            if (dist < minDistance) {
-                minDistance = dist;
-                closestJeep = jeep;
-            }
-        }
-
-        if (closestJeep) {
+        
+        if (allJeeps[requestedPlate]) {
+            const targetJeep = allJeeps[requestedPlate];
+            // Calculate distance between passenger and the EXACT jeepney they selected
+            const dist = getDistance(targetJeep.lat, targetJeep.lon, data.passLat, data.passLon);
+            
+            // Only alert the specific driver
             io.emit('driver_alert', { 
-                plate: closestJeep.plate, 
-                message: `Passenger waiting ${Math.round(minDistance)} meters away!` 
+                plate: requestedPlate, 
+                message: `Passenger waiting ${Math.round(dist)} meters away!` 
             });
-            socket.emit('ping_sent', { plate: closestJeep.plate, distance: minDistance });
+            socket.emit('ping_sent', { plate: requestedPlate, distance: dist });
         } else {
-            socket.emit('ping_sent', { error: "No jeepneys active nearby." });
+            socket.emit('ping_sent', { error: "That jeepney is no longer active." });
         }
     });
 
