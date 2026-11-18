@@ -51,6 +51,14 @@ app.get('/admin-secret-2026', (req, res) => res.sendFile(path.join(__dirname, 'a
 // ==================== REAL-TIME DATA ====================
 let activeJeepneys = {}; 
 
+// THIS IS THE ROUTE YOUR ESP32 USES TO SEND DATA
+app.post('/api/update', (req, res) => {
+    const data = req.body;
+    activeJeepneys[data.plate] = data;
+    io.emit('jeepney_update', data);
+    res.status(200).send("OK");
+});
+
 // Haversine helper (for distance calculations)
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; 
@@ -63,15 +71,8 @@ function getDistance(lat1, lon1, lat2, lon2) {
 io.on('connection', (socket) => {
     socket.emit('initial_data', activeJeepneys);
 
-    // ESP32 sends real data here
-    socket.on('esp32_update', (data) => {
-        activeJeepneys[data.plate] = data;
-        io.emit('jeepney_update', data);
-    });
-
     // Calculate distance when a passenger pings
     socket.on('passenger_ping', (data) => {
-        // Find the closest jeepney to the passenger
         let closestJeep = null;
         let minDistance = Infinity;
 
@@ -85,7 +86,6 @@ io.on('connection', (socket) => {
         }
 
         if (closestJeep) {
-            // Alert the driver
             io.emit('driver_alert', { 
                 plate: closestJeep.plate, 
                 message: `Passenger waiting ${Math.round(minDistance)} meters away!` 
@@ -96,7 +96,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Driver acknowledges ping
     socket.on('driver_acknowledge', (data) => {
         io.emit('ping_acknowledged', { plate: data.plate });
     });
