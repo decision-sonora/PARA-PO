@@ -27,9 +27,21 @@ app.post('/api/ask-ai', async (req, res) => {
         if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: "GROQ_API_KEY missing in Render." });
 
         const systemPrompt = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. 
+        
         RULES:
         1. DO NOT use markdown formatting (no asterisks like **, no hashtags, no bold). Use plain text only.
-        2. Use these Zamboanga City locations: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca.
+        2. If asked for a distance between two places, estimate it based on real-world geography.
+        3. If asked about a location, use the database below to help you.
+        
+        ZAMBOANGA CITY LANDMARK DATABASE:
+        Malls: KCC Mall de Zamboanga, SM City Mindpro, City Mall Tetuan, Southway Square, Canelar Barter Trade.
+        Tourist Spots: Fort Pilar, Pasonanca Park, Paseo del Mar, R.T. Lim Boulevard, Cawa-Cawa Boulevard, Sta. Cruz Island, Taluksangay Mosque, Plaza Pershing, Metropolitan Cathedral.
+        Schools: Western Mindanao State University (WMSU), Ateneo de Zamboanga University (ADZU), Universidad de Zamboanga (UZ), Zamboanga State College of Marine Sciences and Technology (ZSCMST), Don Pablo Lorenzo Memorial High School.
+        Hospitals: Zamboanga City Medical Center (ZCMC), Brent Hospital, Mindanao Central Sanitarium, Zamboanga Doctors Hospital.
+        Transport: Zamboanga International Airport, Integrated Bus Terminal (Canelar).
+        Roads: Governor Camins Avenue, Maria Clara Lobregat Highway, Veterans Avenue, La Purisima Street, Nuñez Extension, Airport Road.
+        Barangays: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca, Mercedes, Sta. Catalina, San Jose Cawa-Cawa.
+        
         Fare Rules:
         - Traditional Jeepneys: Minimum PHP 14 for first 4km, +PHP 2 per succeeding km.
         - Modern Jeepneys: Minimum PHP 17 for first 4km, +PHP 2.40 per succeeding km.`;
@@ -56,7 +68,7 @@ let activeJeepneys = {};
 let testJeepneys = {}; 
 let testPassengers = {}; 
 let jeepneyStatus = {}; 
-let activePings = {}; // Tracks which passenger pinged which jeepney
+let activePings = {}; 
 
 app.post('/api/update', (req, res) => {
     const data = req.body;
@@ -148,7 +160,6 @@ io.on('connection', (socket) => {
         io.emit('clear_all_test_objects');
     });
 
-    // TARGETED PING
     socket.on('passenger_ping', (data) => {
         const requestedPlate = data.plate; 
         const allJeeps = { ...activeJeepneys, ...testJeepneys };
@@ -157,11 +168,10 @@ io.on('connection', (socket) => {
             const targetJeep = allJeeps[requestedPlate];
             const dist = getDistance(targetJeep.lat, targetJeep.lon, data.passLat, data.passLon);
             
-            // Store which socket pinged this jeepney
             activePings[requestedPlate] = { socketId: socket.id, passLat: data.passLat, passLon: data.passLon };
             
             io.emit('driver_alert', { plate: requestedPlate, message: `Passenger waiting ${Math.round(dist)} meters away!` });
-            io.emit('admin_route_to_passenger', { plate: requestedPlate, passLat: data.passLat, passLon: data.passLon }); // Alert admin for auto-route
+            io.emit('admin_route_to_passenger', { plate: requestedPlate, passLat: data.passLat, passLon: data.passLon });
             socket.emit('ping_sent', { plate: requestedPlate, distance: dist });
         } else {
             socket.emit('ping_sent', { error: "Jeepney no longer active." });
@@ -171,7 +181,6 @@ io.on('connection', (socket) => {
     socket.on('driver_acknowledge', (data) => {
         const ping = activePings[data.plate];
         if (ping) {
-            // TARGETED REPLY: Only send to the passenger who pinged
             io.to(ping.socketId).emit('ping_acknowledged', { plate: data.plate });
             delete activePings[data.plate];
         }
