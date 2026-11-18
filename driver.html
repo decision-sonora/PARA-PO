@@ -11,7 +11,7 @@
         #alert-banner { display: none; background: #fd5d93; color: white; padding: 30px; border-radius: 15px; font-size: 28px; font-weight: bold; animation: flash 1s infinite; text-align: center; margin-bottom: 20px; width: 90%; max-width: 600px;}
         #ack-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; }
         
-        /* Top Bar for Route Selection */
+        /* Top Bar */
         #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; justify-content: space-between; pointer-events: none; }
         .top-panel { background: rgba(30, 30, 47, 0.9); color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold; pointer-events: auto; border: 1px solid #00f2c3; }
         .top-panel select { margin-left: 10px; padding: 5px; border-radius: 5px; font-weight: bold; }
@@ -27,14 +27,12 @@
     </style>
 </head>
 <body>
-    <!-- Login Modal -->
     <div id="login-modal">
         <h2>Select Your Jeepney</h2>
         <p>Choose the vehicle you are currently driving:</p>
         <div id="jeepney-list"></div>
     </div>
 
-    <!-- Main Dashboard -->
     <div id="map-container">
         <div id="top-bar">
             <div class="top-panel" id="driver-id">Driver: None</div>
@@ -64,21 +62,21 @@
         const socket = io();
         let driverMarker = null;
         let geofenceCircle = null;
+        let passengerMarker = null;
         let selectedPlate = null;
         let availableJeeps = {};
 
-        // Initialize Map
         function selectJeepney(plate) {
             selectedPlate = plate;
             document.getElementById('login-modal').style.display = 'none';
             document.getElementById('driver-id').innerText = `Driver: ${plate}`;
             
-            // Set the dropdown to the jeepney's current route
             if(availableJeeps[plate]) {
                 document.getElementById('route-select').value = availableJeeps[plate].route;
+                // Center map immediately on selected jeepney
+                map.setView([availableJeeps[plate].lat, availableJeeps[plate].lon], 16);
             }
 
-            // Unlock TTS on user interaction
             if ('speechSynthesis' in window) {
                 let u = new SpeechSynthesisUtterance("Jeepney selected.");
                 window.speechSynthesis.speak(u);
@@ -89,7 +87,6 @@
             if (!selectedPlate) return;
             const newRoute = document.getElementById('route-select').value;
             socket.emit('driver_update_route', { plate: selectedPlate, route: newRoute });
-            
             if(availableJeeps[selectedPlate]) availableJeeps[selectedPlate].route = newRoute;
         }
 
@@ -112,28 +109,19 @@
             }
         }
 
-        // --- Real-time Data Listeners ---
-        socket.on('initial_jeepneys', (data) => {
-            for (let plate in data) availableJeeps[plate] = data[plate];
-            updateJeepneyList();
-        });
-
-        socket.on('initial_test_jeepneys', (data) => {
-            for (let plate in data) availableJeeps[plate] = data[plate];
-            updateJeepneyList();
-        });
+        // --- Data Listeners ---
+        socket.on('initial_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
+        socket.on('initial_test_jeepneys', (data) => { for (let plate in data) availableJeeps[plate] = data[plate]; updateJeepneyList(); });
 
         socket.on('jeepney_update', (data) => {
             availableJeeps[data.plate] = data;
-            updateJeepneyList(); // Update list so route changes reflect
-            
+            updateJeepneyList(); 
             if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
         });
 
         socket.on('test_jeepney_update', (data) => {
             availableJeeps[data.plate] = data;
             updateJeepneyList();
-            
             if (data.plate === selectedPlate) updateDriverMap(data.lat, data.lon);
         });
 
@@ -141,19 +129,36 @@
             delete availableJeeps[plate];
             updateJeepneyList();
             if (selectedPlate === plate) {
-                alert("The jeepney you were tracking was removed by the admin.");
+                alert("The jeepney you were tracking was removed.");
                 location.reload();
             }
         });
 
+        // --- Passenger Visibility ---
+        socket.on('passenger_location_update', (data) => {
+            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+            if (passengerMarker) passengerMarker.setLatLng([data.lat, data.lon]);
+            else passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("Passenger Location");
+        });
+
+        socket.on('test_passenger_update', (data) => {
+            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+            if (passengerMarker) passengerMarker.setLatLng([data.lat, data.lon]);
+            else passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("Test Passenger");
+        });
+
+        socket.on('test_passenger_deleted', () => {
+            if(passengerMarker) { map.removeLayer(passengerMarker); passengerMarker = null; }
+        });
+
+        // --- Alerts ---
         socket.on('driver_alert', (data) => {
-            if (data.plate !== selectedPlate) return; // Only alert if it's for THIS driver
+            if (data.plate !== selectedPlate) return;
 
             document.getElementById('alert-banner').style.display = 'block';
             document.getElementById('alert-banner').innerText = `🔔 ${data.message}`;
             document.getElementById('ack-btn').style.display = 'inline-block';
 
-            // TTS FIX: Cancel any stuck speech before speaking
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
                 const speech = new SpeechSynthesisUtterance(data.message);
