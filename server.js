@@ -61,6 +61,7 @@ app.get('/admin-secret-2026', (req, res) => res.sendFile(path.join(__dirname, 'a
 let activeJeepneys = {}; 
 let testJeepneys = {}; 
 let testPassengers = {}; 
+let jeepneyStatus = {}; // Tracks capacity per jeepney
 
 app.post('/api/update', (req, res) => {
     const data = req.body;
@@ -81,24 +82,34 @@ io.on('connection', (socket) => {
     socket.emit('initial_jeepneys', activeJeepneys);
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
+    socket.emit('initial_status', jeepneyStatus);
 
-    // --- PASSENGER: Broadcast Location ---
-    socket.on('passenger_location_update', (data) => {
-        io.emit('passenger_location_update', { lat: data.lat, lon: data.lon });
-    });
-
-    // --- DRIVER: Update Route ---
+    // --- DRIVER: Update Route & Status ---
     socket.on('driver_update_route', (data) => {
         const plate = data.plate;
-        const newRoute = data.route;
-
         if (activeJeepneys[plate]) {
-            activeJeepneys[plate].route = newRoute;
+            activeJeepneys[plate].route = data.route;
             io.emit('jeepney_update', activeJeepneys[plate]);
         }
         if (testJeepneys[plate]) {
-            testJeepneys[plate].route = newRoute;
+            testJeepneys[plate].route = data.route;
             io.emit('test_jeepney_update', testJeepneys[plate]);
+        }
+    });
+
+    socket.on('update_capacity', (data) => {
+        if (!jeepneyStatus[data.plate]) {
+            jeepneyStatus[data.plate] = { count: 0, max: 20, isFull: false };
+        }
+        jeepneyStatus[data.plate].count = data.count;
+        jeepneyStatus[data.plate].isFull = data.count >= jeepneyStatus[data.plate].max;
+        io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
+    });
+
+    socket.on('toggle_full', (data) => {
+        if (jeepneyStatus[data.plate]) {
+            jeepneyStatus[data.plate].isFull = data.isFull;
+            io.emit('status_update', { plate: data.plate, status: jeepneyStatus[data.plate] });
         }
     });
 
@@ -106,6 +117,7 @@ io.on('connection', (socket) => {
     socket.on('admin_place_test_jeepney', (data) => {
         const plate = "TEST-" + Math.floor(Math.random() * 1000);
         testJeepneys[plate] = { plate: plate, route: data.route, lat: data.lat, lon: data.lon };
+        if (!jeepneyStatus[plate]) jeepneyStatus[plate] = { count: 0, max: 20, isFull: false };
         io.emit('test_jeepney_update', testJeepneys[plate]);
     });
 
@@ -119,6 +131,7 @@ io.on('connection', (socket) => {
 
     socket.on('admin_delete_test_jeepney', (plate) => {
         delete testJeepneys[plate];
+        delete jeepneyStatus[plate];
         io.emit('test_jeepney_deleted', plate);
     });
 
@@ -140,17 +153,15 @@ io.on('connection', (socket) => {
         io.emit('clear_all_test_objects');
     });
 
-    // --- PASSENGER: Ping Specific Driver (FIXED) ---
+    // --- PASSENGER: Ping Specific Driver ---
     socket.on('passenger_ping', (data) => {
-        const requestedPlate = data.plate; // The exact jeepney the passenger clicked
+        const requestedPlate = data.plate; 
         const allJeeps = { ...activeJeepneys, ...testJeepneys };
         
         if (allJeeps[requestedPlate]) {
             const targetJeep = allJeeps[requestedPlate];
-            // Calculate distance between passenger and the EXACT jeepney they selected
             const dist = getDistance(targetJeep.lat, targetJeep.lon, data.passLat, data.passLon);
             
-            // Only alert the specific driver
             io.emit('driver_alert', { 
                 plate: requestedPlate, 
                 message: `Passenger waiting ${Math.round(dist)} meters away!` 
