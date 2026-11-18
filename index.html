@@ -1,51 +1,92 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PARA-PO Passenger Tracker</title>
+    <title>PARA-PO Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: Arial; margin: 0; display: flex; height: 100vh; }
-        #sidebar { width: 280px; padding: 20px; background: #1e1e2f; color: white; overflow-y: auto; }
-        #map { flex-grow: 1; }
-        .card { background: #27293d; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 4px solid #00f2c3; }
+        body { font-family: Arial, sans-serif; margin: 0; display: flex; height: 100vh; background: #f4f4f9; }
+        #sidebar { width: 300px; padding: 20px; background: #1e1e2f; color: white; z-index: 1000; box-shadow: 2px 0 10px rgba(0,0,0,0.5); }
+        #map { flex-grow: 1; height: 100%; }
+        .card { background: #27293d; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 4px solid #00f2c3; }
+        #alert-box { display: none; background: #00f2c3; color: #1e1e2f; padding: 15px; border-radius: 8px; font-weight: bold; margin-bottom: 20px; text-align: center; animation: pulse 1.5s infinite; }
+        
+        /* Chatbot Styles */
+        #chat-container { position: absolute; bottom: 20px; right: 20px; width: 320px; background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); display: flex; flex-direction: column; z-index: 2000; overflow: hidden; }
+        #chat-header { background: #1e1e2f; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; }
+        #chat-messages { height: 300px; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #f9f9f9; }
+        .msg { padding: 10px; border-radius: 8px; max-width: 80%; font-size: 14px; }
+        .msg.bot { background: #e0e0e0; align-self: flex-start; color: #333; }
+        .msg.user { background: #00f2c3; align-self: flex-end; color: #1e1e2f; }
+        #chat-input-area { display: flex; padding: 10px; border-top: 1px solid #ccc; background: white; }
+        #chat-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; outline: none; }
+        #send-btn { background: #1e1e2f; color: white; border: none; padding: 10px 15px; margin-left: 10px; border-radius: 20px; cursor: pointer; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
     <div id="sidebar">
         <h2>PARA-PO Live</h2>
+        <div id="alert-box">🚨 Jeepney is nearby! Look outside!</div>
         <p>Active Jeepneys:</p>
         <div id="jeepney-list">Searching...</div>
     </div>
     <div id="map"></div>
 
+    <!-- Chatbot UI -->
+    <div id="chat-container">
+        <div id="chat-header">
+            <span>🤖 PARA-PO AI Assistant</span>
+            <span style="cursor:pointer;" onclick="document.getElementById('chat-container').style.display='none'">✖</span>
+        </div>
+        <div id="chat-messages">
+            <div class="msg bot">Mabuhay! Hello! Ako si PARA-PO Bot. Ask me about fares, routes, or where the jeepneys are!</div>
+        </div>
+        <div id="chat-input-area">
+            <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleEnter(event)">
+            <button id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map').setView([6.9273, 122.0588], 13);
+        const map = L.map('map').setView([6.9273, 122.0588], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         
         const markers = {};
+        let passengerMarker = null;
+        let lastJeepneyLatLng = null;
         const socket = io();
 
+        // ==================== MAP & GEOFENCE LOGIC ====================
         socket.on('jeepney_update', (data) => {
-            if (data.route === "TEST-JEEP") return; // Hide admin test jeepney from passengers!
-
             const route = data.route;
             if (markers[route]) {
                 markers[route].setLatLng([data.lat, data.lon]);
             } else {
-                const icon = L.divIcon({ className: 'icon', html: '🚐', iconSize: [30, 30] });
+                const icon = L.divIcon({ html: '🚐', iconSize: [30, 30], className: '' });
                 markers[route] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(route);
             }
+            lastJeepneyLatLng = [data.lat, data.lon];
             updateSidebar();
+            checkGeofence();
         });
 
         socket.on('jeepney_lost', (route) => {
             if (markers[route]) {
                 map.removeLayer(markers[route]);
                 delete markers[route];
+                updateSidebar();
             }
-            updateSidebar();
+        });
+
+        socket.on('passenger_update', (data) => {
+            if (passengerMarker) map.removeLayer(passengerMarker);
+            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+            passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("You are here");
+            lastPassengerLatLng = [data.lat, data.lon];
+            checkGeofence();
         });
 
         function updateSidebar() {
@@ -54,6 +95,74 @@
                 html += `<div class="card"><strong>${route}</strong><br>Moving</div>`;
             }
             document.getElementById('jeepney-list').innerHTML = html || "No jeepneys active.";
+        }
+
+        // Calculate distance between Test Jeepney and Test Passenger
+        function checkGeofence() {
+            if (lastJeepneyLatLng && lastPassengerLatLng) {
+                const R = 6371000; // meters
+                const lat1 = lastJeepneyLatLng[0], lon1 = lastJeepneyLatLng[1];
+                const lat2 = lastPassengerLatLng[0], lon2 = lastPassengerLatLng[1];
+                
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                          Math.sin(dLon/2) * Math.sin(dLon/2);
+                const distance = R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+
+                const alertBox = document.getElementById('alert-box');
+                if (distance <= 100) {
+                    alertBox.style.display = 'block';
+                } else {
+                    alertBox.style.display = 'none';
+                }
+            }
+        }
+
+        // ==================== AI CHATBOT LOGIC ====================
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            // Add user message to UI
+            addMessage(text, 'user');
+            input.value = '';
+
+            // Add typing indicator
+            const typingId = 'typing-' + Date.now();
+            addMessage('Typing...', 'bot', typingId);
+
+            try {
+                const res = await fetch('/api/ask-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                
+                // Remove typing, add real response
+                document.getElementById(typingId).remove();
+                addMessage(data.reply || "Sorry, I couldn't understand that.", 'bot');
+            } catch (err) {
+                document.getElementById(typingId).remove();
+                addMessage("Sorry, my connection to the network is down.", 'bot');
+            }
+        }
+
+        function addMessage(text, sender, id = '') {
+            const container = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = `msg ${sender}`;
+            div.innerText = text;
+            if(id) div.id = id;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
         }
     </script>
 </body>
