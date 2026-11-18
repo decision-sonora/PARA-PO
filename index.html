@@ -127,25 +127,33 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
 
-        /* --- BULLETPROOF MOBILE RESPONSIVENESS FIX --- */
+        /* --- BULLETPROOF MOBILE STACKING FIX --- */
         @media (max-width: 768px) {
-            #sidebar {
-                position: fixed; /* Changed to fixed to stay anchored to viewport */
-                top: auto;
-                bottom: 0;
-                left: 0;
-                width: 100vw;
-                height: 55vh; /* Takes bottom half of screen */
-                border-radius: 20px 20px 0 0;
-                box-sizing: border-box;
-                border: none;
-                border-top: 1px solid var(--border-color);
-                z-index: 9999; /* Forces it above everything else */
-                padding: 15px;
-                background: #1a1a1a; /* Solid fallback so map doesn't bleed through */
+            body {
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+                overflow: hidden;
             }
             #map {
-                height: 100vh;
+                position: relative; /* Changed from absolute */
+                height: 50vh;       /* Top half of screen */
+                width: 100vw;
+                flex-shrink: 0;
+                z-index: 1;
+            }
+            #sidebar {
+                position: relative; /* Changed from absolute */
+                height: 50vh;       /* Bottom half of screen */
+                width: 100vw;
+                flex-shrink: 0;
+                border-radius: 0;
+                border: none;
+                border-top: 1px solid var(--border-color);
+                padding: 15px;
+                box-sizing: border-box;
+                z-index: 9999;
+                overflow-y: auto;
             }
             #chat-container {
                 position: fixed;
@@ -154,17 +162,12 @@
                 width: 100vw;
                 height: 65vh;
                 border-radius: 20px 20px 0 0;
-                z-index: 10000; /* Above sidebar */
+                z-index: 10000;
             }
             #chat-toggle {
-                bottom: 57vh; /* Moves above the bottom sheet */
-                right: 15px;
-                width: 50px;
-                height: 50px;
+                bottom: 20px;
+                right: 20px;
                 z-index: 10001;
-            }
-            .leaflet-bottom.leaflet-right {
-                bottom: 55vh; /* Pushes map zoom controls up */
             }
         }
     </style>
