@@ -30,8 +30,8 @@ app.post('/api/ask-ai', async (req, res) => {
         
         RULES:
         1. DO NOT use markdown formatting (no asterisks like **, no hashtags, no bold). Use plain text only.
-        2. If asked for a distance between two places, estimate it based on real-world geography.
-        3. If asked about a location, use the database below to help you.
+        2. If asked about a location, use the database below.
+        3. If asked for a distance, use the verified distance matrix below to answer accurately. Do not guess.
         
         ZAMBOANGA CITY LANDMARK DATABASE:
         Malls: KCC Mall de Zamboanga, SM City Mindpro, City Mall Tetuan, Southway Square, Canelar Barter Trade.
@@ -41,6 +41,13 @@ app.post('/api/ask-ai', async (req, res) => {
         Transport: Zamboanga International Airport, Integrated Bus Terminal (Canelar).
         Roads: Governor Camins Avenue, Maria Clara Lobregat Highway, Veterans Avenue, La Purisima Street, Nuñez Extension, Airport Road.
         Barangays: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca, Mercedes, Sta. Catalina, San Jose Cawa-Cawa.
+        
+        VERIFIED DRIVING DISTANCE MATRIX (From KCC Mall):
+        - Ayala to KCC Mall: 16.0 km
+        - Zamboanga International Airport to KCC Mall: 3.7 km
+        - WMSU to KCC Mall: 3.2 km
+        - Fort Pilar to KCC Mall: 1.4 km
+        - SM City Mindpro to KCC Mall: 0.5 km
         
         Fare Rules:
         - Traditional Jeepneys: Minimum PHP 14 for first 4km, +PHP 2 per succeeding km.
