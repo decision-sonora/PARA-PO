@@ -26,7 +26,6 @@
             overflow: hidden;
         }
 
-        /* Full screen map container */
         #map { 
             position: absolute; 
             top: 0; 
@@ -34,10 +33,9 @@
             width: 100%; 
             height: 100%; 
             z-index: 1;
-            filter: brightness(0.85) contrast(1.1); /* Darkens map slightly to match theme */
+            filter: brightness(0.85) contrast(1.1);
         }
 
-        /* Floating Sidebar */
         #sidebar { 
             position: absolute;
             top: 20px;
@@ -60,7 +58,6 @@
         h2 { margin-top: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;}
         h2::before { content: ''; display: block; width: 12px; height: 12px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 10px var(--accent-green); }
 
-        /* Cards */
         .card { 
             background: var(--card-bg); 
             padding: 16px; 
@@ -73,7 +70,6 @@
         .card strong { font-size: 15px; display: block; margin-bottom: 4px;}
         .card span { font-size: 13px; color: var(--text-secondary); }
         
-        /* Buttons */
         .ping-btn, .loc-btn, #search-btn, #send-btn { 
             background: #2a2a2a; 
             color: white; 
@@ -101,7 +97,6 @@
         
         #alert-box { display: none; background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); padding: 16px; border-radius: 8px; font-weight: 600; margin-bottom: 15px; text-align: center; }
         
-        /* Search & Controls */
         #search-container { display: flex; margin-bottom: 12px; }
         #location-search { flex-grow: 1; padding: 12px 16px; border-radius: 8px 0 0 8px; border: 1px solid var(--border-color); border-right: none; outline: none; background: #1a1a1a; color: white; font-family: 'Inter', sans-serif;}
         #search-btn { border-radius: 0 8px 8px 0; padding: 0 16px; }
@@ -109,7 +104,6 @@
         .loc-btn { flex: 1; padding: 10px; font-size: 12px;}
         .loc-btn.active { background: rgba(163, 230, 53, 0.2); border-color: var(--accent-green); color: var(--accent-green); }
 
-        /* Chatbot */
         #chat-toggle { position: absolute; bottom: 30px; right: 30px; background: #1e1e1e; color: var(--accent-green); border: 1px solid #333; border-radius: 50%; width: 60px; height: 60px; font-size: 24px; cursor: pointer; z-index: 3000; display: flex; justify-content: center; align-items: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); transition: 0.3s;}
         #chat-toggle:hover { background: #2a2a2a; transform: scale(1.1); }
         
@@ -123,7 +117,6 @@
         #chat-input { flex-grow: 1; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; outline: none; background: #121212; color: white; font-family: 'Inter', sans-serif;}
         #send-btn { margin-left: 10px; padding: 0 16px; background: var(--accent-green); color: black; border: none; }
         
-        /* Custom Markers */
         .custom-jeep-icon { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .jeep-name { font-weight: 700; color: var(--accent-green); background: rgba(0,0,0,0.8); padding: 2px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; margin-bottom: 2px;}
         .jeep-emoji { font-size: 30px; line-height: 25px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); }
@@ -133,6 +126,44 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+
+        /* --- MOBILE RESPONSIVENESS FIX --- */
+        @media (max-width: 768px) {
+            #sidebar {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                height: 50vh; /* Takes bottom half of screen */
+                border-radius: 20px 20px 0 0;
+                box-sizing: border-box;
+                border-bottom: none;
+                border-left: none;
+                border-right: none;
+                z-index: 2000;
+                padding: 15px;
+            }
+            #map {
+                height: 100vh;
+            }
+            #chat-container {
+                bottom: 0;
+                right: 0;
+                width: 100%;
+                height: 65vh;
+                border-radius: 20px 20px 0 0;
+                z-index: 3000;
+            }
+            #chat-toggle {
+                bottom: 52vh; /* Moves above the bottom sheet */
+                right: 15px;
+                width: 50px;
+                height: 50px;
+            }
+            .leaflet-bottom.leaflet-right {
+                bottom: 50vh; /* Pushes map zoom controls up */
+            }
+        }
     </style>
 </head>
 <body>
@@ -275,7 +306,6 @@
             document.getElementById('board-btn').style.display = 'block';
         }
 
-        // --- ETA Calculation ---
         function updateLineDistance() {
             if(!pingLine || !passengerLatLng || !currentJeepPos) return;
             const dist = map.distance(passengerLatLng, currentJeepPos);
@@ -463,7 +493,6 @@
             container.scrollTop = container.scrollHeight;
         }
         
-        // Customize the leaflet tooltip
         const style = document.createElement('style');
         style.innerHTML = `
             .dist-tooltip {
