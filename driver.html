@@ -5,14 +5,24 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { font-family: Arial; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e2f; }
-        #map { flex-grow: 1; }
-        #alert-banner { display: none; background: #fd5d93; color: white; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; animation: flash 1s infinite; z-index: 1000; }
+        #map-container { height: 40vh; width: 100%; position: relative; }
+        #map { height: 100%; width: 100%; }
+        #alert-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; padding: 20px; }
+        #driver-id { position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.7); color: #00f2c3; padding: 10px; border-radius: 5px; font-weight: bold; }
+        #alert-banner { display: none; background: #fd5d93; color: white; padding: 30px; border-radius: 15px; font-size: 28px; font-weight: bold; animation: flash 1s infinite; text-align: center; margin-bottom: 20px; width: 90%; max-width: 600px;}
+        #ack-btn { display: none; background: #00f2c3; color: #1e1e2f; border: none; padding: 20px 40px; font-size: 24px; border-radius: 10px; cursor: pointer; font-weight: bold; }
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <div id="alert-banner">🔔 PASSENGER WAITING NEARBY!</div>
-    <div id="map"></div>
+    <div id="map-container">
+        <div id="driver-id">Driver: Select a Jeepney</div>
+        <div id="map"></div>
+    </div>
+    <div id="alert-area">
+        <div id="alert-banner">🔔 PASSENGER WAITING NEARBY!</div>
+        <button id="ack-btn" onclick="acknowledge()">✅ I SEE THEM</button>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -23,12 +33,20 @@
         const socket = io();
         let driverMarker = null;
         let geofenceCircle = null;
+        let selectedPlate = null;
+
+        // Select which jeepney the driver is in
+        function selectJeepney(plate) {
+            selectedPlate = plate;
+            document.getElementById('driver-id').innerText = `Driver: ${plate}`;
+            map.setView([6.9273, 122.0588], 16); // Reset view
+        }
 
         socket.on('driver_alert', (data) => {
-            document.getElementById('alert-banner').innerText = `🔔 ${data.message}`;
             document.getElementById('alert-banner').style.display = 'block';
+            document.getElementById('alert-banner').innerText = `🔔 ${data.message}`;
+            document.getElementById('ack-btn').style.display = 'inline-block';
 
-            // Hands-free voice alert
             if ('speechSynthesis' in window) {
                 const speech = new SpeechSynthesisUtterance(data.message);
                 speech.rate = 1; speech.pitch = 1;
@@ -37,29 +55,41 @@
 
             setTimeout(() => {
                 document.getElementById('alert-banner').style.display = 'none';
-            }, 10000);
+                document.getElementById('ack-btn').style.display = 'none';
+            }, 15000);
         });
 
-        // Listen for ESP32 data (Your driver device should also send its location here)
+        // Listen for updates to the selected jeepney
         socket.on('jeepney_update', (data) => {
-            // Update the map center to follow the jeepney
-            map.setView([data.lat, data.lon], 16);
-
-            if (driverMarker) {
-                driverMarker.setLatLng([data.lat, data.lon]);
-            } else {
-                const icon = L.divIcon({ html: '🚐', iconSize: [40, 40], className: '' });
-                driverMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map);
+            if (data.plate === selectedPlate) {
+                updateDriverMap(data.lat, data.lon);
             }
-
-            // Update the geofence circle
-            if (geofenceCircle) {
-                map.removeLayer(geofenceCircle);
-            }
-            geofenceCircle = L.circle([data.lat, data.lon], {
-                color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100
-            }).addTo(map);
         });
+
+        socket.on('test_jeepney_update', (data) => {
+            if (data.plate === selectedPlate) {
+                updateDriverMap(data.lat, data.lon);
+            }
+        });
+
+        function updateDriverMap(lat, lon) {
+            map.setView([lat, lon], 16);
+
+            if (driverMarker) driverMarker.setLatLng([lat, lon]);
+            else {
+                const icon = L.divIcon({ html: '🚐', iconSize: [40, 40], className: '' });
+                driverMarker = L.marker([lat, lon], {icon: icon}).addTo(map);
+            }
+
+            if (geofenceCircle) map.removeLayer(geofenceCircle);
+            geofenceCircle = L.circle([lat, lon], { color: '#00f2c3', fillColor: '#00f2c3', fillOpacity: 0.2, radius: 100 }).addTo(map);
+        }
+
+        function acknowledge() {
+            if (selectedPlate) socket.emit('driver_acknowledge', { plate: selectedPlate });
+            document.getElementById('alert-banner').style.display = 'none';
+            document.getElementById('ack-btn').style.display = 'none';
+        }
     </script>
 </body>
 </html>
