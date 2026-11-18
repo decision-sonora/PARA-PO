@@ -11,11 +11,14 @@
         .ping-btn { background: #fd5d93; color: white; border: none; padding: 8px; width: 100%; border-radius: 5px; cursor: pointer; margin-top: 10px; font-weight: bold;}
         #alert-box { display: none; background: #00f2c3; color: #1e1e2f; padding: 15px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; animation: pulse 1.5s infinite; }
         
-        /* Maxim-style Search Bar */
-        #search-container { display: flex; margin-bottom: 15px; }
-        #location-search { flex-grow: 1; padding: 10px; border-radius: 5px 0 0 5px; border: none; outline: none; font-size: 14px; }
+        /* Location Controls */
+        .loc-btn { background: #27293d; color: white; border: 1px solid #00f2c3; padding: 10px; border-radius: 5px; cursor: pointer; flex: 1; margin: 0 5px; font-size: 12px;}
+        .loc-btn:hover { background: #00f2c3; color: #1e1e2f; }
+        #search-container { display: flex; margin-bottom: 10px; }
+        #location-search { flex-grow: 1; padding: 10px; border-radius: 5px 0 0 5px; border: none; outline: none; }
         #search-btn { background: #00f2c3; color: #1e1e2f; border: none; padding: 10px 15px; border-radius: 0 5px 5px 0; cursor: pointer; font-weight: bold; }
-
+        .loc-controls { display: flex; margin-bottom: 15px; }
+        
         /* Chatbot */
         #chat-toggle { position: absolute; bottom: 20px; right: 20px; background: #1e1e2f; color: white; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 30px; cursor: pointer; z-index: 3000; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
         #chat-container { display: none; position: absolute; bottom: 90px; right: 20px; width: 320px; background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); flex-direction: column; z-index: 2000; overflow: hidden; }
@@ -34,10 +37,14 @@
     <div id="sidebar">
         <h2>PARA-PO Live</h2>
         
-        <!-- Search Bar -->
         <div id="search-container">
-            <input type="text" id="location-search" placeholder="Search location (e.g. Ayala)..." onkeypress="handleSearchEnter(event)">
+            <input type="text" id="location-search" placeholder="Search location..." onkeypress="handleSearchEnter(event)">
             <button id="search-btn" onclick="searchLocation()">🔍</button>
+        </div>
+        
+        <div class="loc-controls">
+            <button class="loc-btn" onclick="autoLocate()">📍 Auto Locate</button>
+            <button class="loc-btn" id="manual-btn" onclick="enableManualLocate()">👆 Click Map</button>
         </div>
 
         <div id="alert-box">🚨 Jeepney is nearby! Look outside!</div>
@@ -71,44 +78,66 @@
         const geofences = {};
         let activeData = {}; 
         let passengerLatLng = null;
-        let passengerMarker = null;
+        let myMarker = null; // Only I can see my marker
+        let manualMode = false;
         const socket = io();
 
-        // --- Search Function (Nominatim API) ---
+        // --- Private Location System ---
+        function setMyLocation(lat, lon) {
+            passengerLatLng = [lat, lon];
+            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
+            if (myMarker) map.removeLayer(myMarker);
+            myMarker = L.marker([lat, lon], {icon: icon}).addTo(map).bindPopup("You are here");
+            
+            socket.emit('passenger_location_update', { lat: lat, lon: lon });
+            checkGeofence();
+        }
+
+        function autoLocate() {
+            if (!navigator.geolocation) return alert("Geolocation not supported by your browser.");
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    setMyLocation(pos.coords.latitude, pos.coords.longitude);
+                    map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+                    alert("Location found!");
+                },
+                (err) => alert("Could not get location. Please use the manual click mode.")
+            );
+        }
+
+        function enableManualLocate() {
+            manualMode = true;
+            document.getElementById('manual-btn').style.background = "#00f2c3";
+            document.getElementById('manual-btn').style.color = "#1e1e2f";
+            alert("Click anywhere on the map to set your location.");
+        }
+
+        map.on('click', (e) => {
+            if (manualMode) {
+                setMyLocation(e.latlng.lat, e.latlng.lng);
+                manualMode = false;
+                document.getElementById('manual-btn').style.background = "";
+                document.getElementById('manual-btn').style.color = "";
+            }
+        });
+
         function handleSearchEnter(e) { if (e.key === 'Enter') searchLocation(); }
 
         async function searchLocation() {
             const query = document.getElementById('location-search').value;
             if (!query) return;
-
             try {
-                // Search only within Zamboanga City
                 const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Zamboanga City')}`);
                 const data = await res.json();
-                
                 if (data.length > 0) {
                     const lat = parseFloat(data[0].lat);
                     const lon = parseFloat(data[0].lon);
-                    
+                    setMyLocation(lat, lon);
                     map.setView([lat, lon], 16);
-                    passengerLatLng = [lat, lon];
-
-                    // Drop a passenger marker
-                    const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-                    if (passengerMarker) map.removeLayer(passengerMarker);
-                    passengerMarker = L.marker([lat, lon], {icon: icon}).addTo(map).bindPopup("Your Location");
-                    
-                    // Let the server (and drivers) know where you are
-                    socket.emit('passenger_location_update', { lat: lat, lon: lon });
-                    
-                    // Re-check if a jeepney is nearby
-                    checkGeofence();
                 } else {
-                    alert("Location not found. Try another barangay or landmark.");
+                    alert("Location not found.");
                 }
-            } catch (err) {
-                alert("Error searching location. Check your internet connection.");
-            }
+            } catch (err) { alert("Error searching."); }
         }
 
         // --- Real-time Listeners ---
@@ -133,20 +162,6 @@
             if (geofences[plate]) map.removeLayer(geofences[plate]);
             delete markers[plate]; delete geofences[plate]; delete activeData[plate];
             renderSidebar();
-            checkGeofence();
-        });
-
-        socket.on('test_passenger_update', (data) => {
-            passengerLatLng = [data.lat, data.lon];
-            const icon = L.divIcon({ html: '🧍', iconSize: [30, 30], className: '' });
-            if (passengerMarker) map.removeLayer(passengerMarker);
-            passengerMarker = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup("Test Passenger");
-            checkGeofence();
-        });
-
-        socket.on('test_passenger_deleted', () => {
-            if(passengerMarker) map.removeLayer(passengerMarker);
-            passengerLatLng = null;
             checkGeofence();
         });
 
@@ -197,7 +212,7 @@
         }
 
         function pingDriver(plate) {
-            if(!passengerLatLng) return alert("Please search for your location on the map first.");
+            if(!passengerLatLng) return alert("Please set your location first (Auto or Click Map).");
             socket.emit('passenger_ping', { plate: plate, passLat: passengerLatLng[0], passLon: passengerLatLng[1] });
             alert("Ping sent to driver!");
         }
@@ -231,7 +246,7 @@
                 addMessage(data.reply || data.error, 'bot');
             } catch (err) {
                 document.getElementById(typingId).remove();
-                addMessage("Network error. Check your connection.", 'bot');
+                addMessage("Network error.", 'bot');
             }
         }
 
