@@ -9,12 +9,10 @@
         #map { height: 100%; width: 100%; background: #333; }
         #alert-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; padding: 20px; }
         
-        /* Capacity UI */
-        #capacity-panel { background: #27293d; padding: 15px; border-radius: 8px; border: 1px solid #00f2c3; display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
-        .cap-btn { background: #444; color: white; border: none; padding: 10px 20px; font-size: 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .cap-btn:hover { background: #555; }
+        /* Capacity UI (Automated) */
+        #capacity-panel { background: #27293d; padding: 15px 30px; border-radius: 8px; border: 1px solid #00f2c3; display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
         #pass-count { font-size: 24px; font-weight: bold; color: #00f2c3; }
-        #full-status { font-size: 20px; font-weight: bold; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+        #full-status { font-size: 20px; font-weight: bold; padding: 10px 20px; border-radius: 5px; cursor: pointer; user-select: none;}
         .status-full { background: #fd5d93; color: white; }
         .status-open { background: #00f2c3; color: #1e1e2f; }
 
@@ -72,10 +70,9 @@
     </div>
     
     <div id="alert-area">
+        <!-- Automated Capacity UI -->
         <div id="capacity-panel">
-            <button class="cap-btn" onclick="adjustCapacity(-1)">-</button>
-            <div id="pass-count">0 / 20</div>
-            <button class="cap-btn" onclick="adjustCapacity(1)">+</button>
+            <div style="font-size: 16px;">Passengers: <span id="pass-count">0 / 20</span></div>
             <div id="full-status" class="status-open" onclick="toggleFullStatus()">NOT FULL</div>
         </div>
 
@@ -127,7 +124,7 @@
             }
         }
 
-        // --- Capacity Logic ---
+        // --- Capacity Logic (Automated via Server) ---
         function updateCapacityDisplay() {
             document.getElementById('pass-count').innerText = `${currentCount} / ${MAX_CAPACITY}`;
             const statusDiv = document.getElementById('full-status');
@@ -138,19 +135,6 @@
                 statusDiv.innerText = "NOT FULL";
                 statusDiv.className = "status-open";
             }
-            socket.emit('update_capacity', { plate: selectedPlate, count: currentCount });
-        }
-
-        function adjustCapacity(amount) {
-            currentCount += amount;
-            if(currentCount < 0) currentCount = 0;
-            if(currentCount > MAX_CAPACITY) currentCount = MAX_CAPACITY;
-            
-            // Automation: If count reaches max, auto-set to full
-            if(currentCount >= MAX_CAPACITY) isFull = true;
-            else if(currentCount < MAX_CAPACITY) isFull = false;
-            
-            updateCapacityDisplay();
         }
 
         function toggleFullStatus() {
@@ -173,6 +157,13 @@
                 currentCount = data.status.count;
                 isFull = data.status.isFull;
                 updateCapacityDisplay();
+                
+                // Voice alert when someone boards
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const speech = new SpeechSynthesisUtterance("A passenger has boarded.");
+                    window.speechSynthesis.speak(speech);
+                }
             }
         });
 
@@ -326,9 +317,6 @@
             if (selectedPlate) socket.emit('driver_acknowledge', { plate: selectedPlate });
             document.getElementById('alert-banner').style.display = 'none';
             document.getElementById('ack-btn').style.display = 'none';
-            
-            // AUTOMATION: Add +1 passenger when acknowledging a ping
-            adjustCapacity(1); 
         }
     </script>
 </body>
