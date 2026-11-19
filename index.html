@@ -12,12 +12,25 @@
 body{font-family:'Inter',sans-serif;margin:0;height:100vh;height:100dvh;background:var(--bg);color:var(--text);overflow:hidden}
 button,input{font-family:inherit}
 :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.ic{flex-shrink:0;vertical-align:-3px}
 #map{position:absolute;inset:0;z-index:1;filter:brightness(.85) contrast(1.1)}
 #sidebar{position:absolute;top:20px;left:20px;bottom:20px;width:360px;background:var(--panel);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:16px;border:1px solid var(--line);padding:24px;z-index:1000;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+#find{flex-shrink:0}
 h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}
 #conn{width:12px;height:12px;border-radius:50%;background:var(--amber);box-shadow:0 0 10px var(--amber)}
 #conn.on{background:var(--green);box-shadow:0 0 10px var(--green)}
 #conn.off{background:var(--red);box-shadow:0 0 10px var(--red)}
+
+/* route data loading bar */
+.routebar{flex-shrink:0;margin:0 0 16px;padding:10px 12px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.03)}
+.routebar[hidden]{display:none}
+.rb-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;color:var(--dim);font-weight:500;margin-bottom:8px}
+.rb-top b{color:var(--green);font-weight:700;font-variant-numeric:tabular-nums}
+.rb-track{height:6px;border-radius:999px;background:#2a2a2a;overflow:hidden}
+#rb-fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#84cc16,#a3e635);transition:width .5s ease}
+.routebar.busy #rb-fill{background-size:200% 100%;background-image:linear-gradient(90deg,#84cc16,#bef264,#84cc16);animation:rbflow 1.6s linear infinite}
+@keyframes rbflow{to{background-position:-200% 0}}
+
 .btn{background:#2a2a2a;color:#fff;border:1px solid #444;padding:11px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:.2s;display:flex;justify-content:center;align-items:center;gap:8px}
 .btn:hover:not(:disabled){background:#333;border-color:#555}
 .btn:disabled{opacity:.45;cursor:not-allowed}
@@ -25,7 +38,7 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .btn.solid{background:var(--green);color:#000;border:none;font-weight:700}
 .btn.solid:hover:not(:disabled){background:#bcf258}
 .btn.red{color:#fca5a5;border-color:rgba(239,68,68,.4)}
-.search-form{display:flex;margin-bottom:10px}
+.search-form{display:flex;margin-bottom:12px}
 .search-form input{flex:1;min-width:0;padding:12px 14px;border-radius:8px 0 0 8px;border:1px solid var(--line);border-right:none;background:#1a1a1a;color:#fff;outline:none}
 .search-form .btn{border-radius:0 8px 8px 0;padding:0 16px}
 #dest-input{border-color:rgba(56,189,248,.45)}
@@ -33,24 +46,29 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .loc-row{display:flex;gap:10px;margin-bottom:14px}
 .loc-row .btn{flex:1;font-size:12px}
 .btn.active{background:rgba(163,230,53,.2);border-color:var(--green);color:var(--green)}
-#explore-btn{width:100%;margin-bottom:12px;color:var(--amber);border-color:rgba(251,191,36,.45)}
+#explore-btn{width:100%;margin-bottom:14px;color:var(--amber);border-color:rgba(251,191,36,.45)}
 #explore{display:none;flex:1;min-height:0;overflow-y:auto}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
-.chip{background:#2a2a2a;border:1px solid #444;border-radius:999px;padding:6px 11px;font-size:12px;cursor:pointer;color:#fff;font-weight:600;white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:6px;background:#2a2a2a;border:1px solid #444;border-radius:999px;padding:6px 11px;font-size:12px;cursor:pointer;color:#fff;font-weight:600;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
 .chip:hover{background:#333}
 .chip.on{background:rgba(251,191,36,.18);border-color:var(--amber);color:var(--amber)}
 .tips{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.5;color:#e8d9a8}
 .tips b{color:#fff}
 .place .pair{display:flex;gap:8px}
 .place .pair .btn{margin-top:10px}
-.place .tip{font-size:12px;color:#c9b97a;margin-top:6px;line-height:1.4}
-#chips{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#1a1a1a}
+.place .tip{display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#c9b97a;margin-top:6px;line-height:1.4}
+.place .tip .ic{margin-top:1px;color:var(--amber)}
+.pl-name{display:flex;align-items:center;gap:8px}
+.pl-name .ic{color:var(--green)}
+#chips{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;border-top:1px solid var(--line);background:#1a1a1a}
 #plan{max-height:34vh;overflow-y:auto}
 .plan{background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.35);border-radius:12px;padding:12px;margin-bottom:12px}
 .plan .meta{line-height:1.45}
 .plan .rt{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
 .plan .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
 .plan .note{font-size:11px;color:#777;margin-top:8px}
+.plan-title{display:inline-flex;align-items:center;gap:8px}
+.plan-title .ic{color:var(--blue)}
 #list{flex:1;overflow-y:auto;min-height:0}
 .list-head{font-size:12px;color:var(--dim);font-weight:600;margin:4px 0 8px}
 .card{background:var(--card);padding:14px;margin-bottom:10px;border-radius:12px;border:1px solid var(--line)}
@@ -62,34 +80,44 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;white-space:nowrap}
 .badge.open{background:rgba(163,230,53,.15);color:var(--green)}
 .badge.full{background:rgba(239,68,68,.2);color:var(--red)}
-.badge.way{background:rgba(56,189,248,.18);color:var(--blue)}
+.badge.way{background:rgba(56,189,248,.18);color:var(--blue);display:inline-flex;align-items:center;gap:5px}
 .badge.custom{background:rgba(251,191,36,.15);color:var(--amber)}
 .card .btn{width:100%;margin-top:10px}
 .card .pair{display:flex;gap:8px}
 .empty{color:#888;font-size:14px;line-height:1.5}
 #nearby{display:none;background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3);padding:14px;border-radius:8px;font-weight:600;margin-bottom:12px;text-align:center}
+#nearby .ic{margin-right:6px}
 #ride{display:none;flex-direction:column;gap:12px}
 #ride .big{font-size:34px;font-weight:700}
 #disembark{padding:18px;font-size:17px;background:var(--red);border:none;animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 14px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
-.jeep-icon{display:flex;flex-direction:column;align-items:center}
+
+/* map markers */
+.jeep-icon{display:flex;flex-direction:column;align-items:center;gap:3px}
 .jeep-icon.dim{opacity:.4}
 .jeep-name{font-weight:700;color:var(--green);background:rgba(0,0,0,.8);padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap}
 .jeep-name.full{color:var(--red)}
-.jeep-emoji{font-size:30px;line-height:28px}
+.jeep-badge{width:30px;height:30px;border-radius:50%;background:var(--green);color:#0b0b0b;display:grid;place-items:center;border:2px solid #0b0b0b;box-shadow:0 3px 10px rgba(0,0,0,.55)}
+.jeep-badge.full{background:var(--red);color:#fff}
+.pin-badge{width:30px;height:30px;border-radius:50%;background:#1e1e1e;display:grid;place-items:center;border:2px solid var(--green);color:var(--green);box-shadow:0 3px 10px rgba(0,0,0,.55)}
+.pin-badge.dest{border-color:var(--blue);color:var(--blue)}
 .road-label-wrap{background:none;border:none}
 .road-label{transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;color:#000;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px;border:2px solid #0b0b0b;box-shadow:0 4px 12px rgba(0,0,0,.55)}
 .board-pin{display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%);transition:opacity 6s ease-out,filter 6s ease-out}
 .board-pin .tag{background:#1e1e1e;color:#a3e635;border:1px solid #a3e635;border-radius:8px;font-size:11px;font-weight:700;padding:3px 8px;white-space:nowrap}
-.board-pin .pin{font-size:30px;line-height:30px;filter:drop-shadow(0 0 5px #a3e635)}
+.board-pin .pin{line-height:0;margin-top:2px;color:#a3e635;filter:drop-shadow(0 0 5px #a3e635)}
+.board-pin .pin svg{fill:rgba(163,230,53,.25)}
 .board-pin.decay{opacity:0;filter:grayscale(1) blur(3px)}
+
 #toasts{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:20000;display:flex;flex-direction:column;gap:8px;width:min(90vw,420px);pointer-events:none}
 .toast{background:#1e1e1e;border:1px solid #444;border-left:4px solid var(--green);padding:12px 14px;border-radius:8px;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .toast.err{border-left-color:var(--red)}
-#chat-toggle{position:absolute;bottom:30px;right:30px;background:#1e1e1e;color:var(--green);border:1px solid #333;border-radius:50%;width:60px;height:60px;font-size:24px;cursor:pointer;z-index:3000;box-shadow:0 10px 25px rgba(0,0,0,.5)}
+#chat-toggle{position:absolute;bottom:30px;right:30px;background:#1e1e1e;color:var(--green);border:1px solid #333;border-radius:50%;width:60px;height:60px;cursor:pointer;z-index:3000;box-shadow:0 10px 25px rgba(0,0,0,.5);display:grid;place-items:center}
 #chat{display:none;position:absolute;bottom:100px;right:30px;width:340px;background:var(--panel);backdrop-filter:blur(20px);border-radius:16px;border:1px solid var(--line);box-shadow:0 15px 40px rgba(0,0,0,.6);flex-direction:column;z-index:2000;overflow:hidden}
-#chat-head{background:rgba(0,0,0,.3);padding:14px 16px;font-weight:600;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
-#chat-head button{background:none;border:none;color:#888;cursor:pointer;font-size:16px}
+#chat-head{background:rgba(0,0,0,.3);padding:14px 16px;font-weight:600;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}
+#chat-head span{display:flex;align-items:center;gap:8px}
+#chat-head span .ic{color:var(--green)}
+#chat-head button{background:none;border:none;color:#888;cursor:pointer;display:grid;place-items:center;padding:4px}
 #chat-msgs{height:300px;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
 .msg{padding:10px 14px;border-radius:12px;max-width:85%;font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
 .msg.bot{background:#2a2a2a;align-self:flex-start;color:#ddd;border-bottom-left-radius:4px}
@@ -99,58 +127,66 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#444;border-radius:10px}
 @media(max-width:768px){
  body{display:flex;flex-direction:column}
- #map{position:relative;inset:auto;height:48%;width:100%;flex-shrink:0}
- #sidebar{position:relative;inset:auto;flex:1;min-height:0;width:100%;border-radius:0;border:none;border-top:1px solid var(--line);padding:14px;z-index:1000}
+ #map{position:relative;inset:auto;height:42%;width:100%;flex-shrink:0}
+ #sidebar{position:relative;inset:auto;flex:1;min-height:0;width:100%;border-radius:0;border:none;border-top:1px solid var(--line);padding:14px;z-index:1000;overflow-y:auto}
+ #list{flex:none;overflow:visible}
+ h2{margin-bottom:12px;font-size:20px}
+ .routebar{margin-bottom:12px;padding:8px 10px 10px}
+ .loc-row{margin-bottom:12px}
  #plan{max-height:30vh}
  #chat{position:fixed;bottom:0;right:0;width:100%;border-radius:20px 20px 0 0;z-index:10000}
  #chat-msgs{height:45vh}
  #chat-toggle{position:fixed;bottom:16px;right:16px;width:52px;height:52px;z-index:3000}
 }
-@media(prefers-reduced-motion:reduce){#disembark{animation:none}*{transition:none!important}}
+@media(prefers-reduced-motion:reduce){#disembark,.routebar.busy #rb-fill{animation:none}*{transition:none!important}}
 </style>
 </head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 <div id="sidebar">
   <h2><span id="conn" title="Connecting"></span>PARA-PO Live</h2>
+  <div id="routebar" class="routebar busy" hidden role="status" aria-live="polite">
+    <div class="rb-top"><span id="rb-label">Loading route data…</span><b id="rb-pct">0%</b></div>
+    <div class="rb-track"><div id="rb-fill"></div></div>
+  </div>
   <div id="find">
     <form id="search-row" class="search-form">
       <input id="location-search" placeholder="Search where you are (Zamboanga)" autocomplete="off">
-      <button class="btn" id="search-btn" aria-label="Search">🔍</button>
+      <button class="btn" id="search-btn" aria-label="Search" data-icon="search"></button>
     </form>
     <div class="loc-row">
-      <button class="btn" id="auto-btn">📍 Use my location</button>
-      <button class="btn" id="manual-btn">👆 Pick on map</button>
+      <button class="btn" id="auto-btn" data-icon="crosshair" data-size="16">Use my location</button>
+      <button class="btn" id="manual-btn" data-icon="pointer" data-size="16">Pick on map</button>
     </div>
     <form id="dest-row" class="search-form">
       <input id="dest-input" placeholder="Where are you going?" autocomplete="off">
-      <button class="btn" id="dest-btn" aria-label="Find a route">🧭</button>
+      <button class="btn" id="dest-btn" aria-label="Find a route" data-icon="navigation"></button>
     </form>
-    <button class="btn" id="explore-btn">🌴 Explore Zamboanga (tourist guide)</button>
+    <button class="btn" id="explore-btn" data-icon="compass" data-size="16">Explore Zamboanga (tourist guide)</button>
     <div id="plan" aria-live="polite"></div>
   </div>
   <div id="explore"></div>
-  <div id="nearby">🚨 A jeepney is within 100 m. Look outside!</div>
+  <div id="nearby" data-icon="alert" data-size="16">A jeepney is within 100 m. Look outside!</div>
   <div id="list"></div>
   <div id="ride">
     <div class="meta">You are riding</div>
     <div class="big" id="ride-plate"></div>
     <div class="meta" id="ride-info"></div>
-    <button class="btn" id="disembark">🚪 I'm getting off</button>
+    <button class="btn" id="disembark" data-icon="logout" data-size="20">I'm getting off</button>
   </div>
 </div>
 <div id="map"></div>
 
-<button id="chat-toggle" aria-label="Open assistant">💬</button>
+<button id="chat-toggle" aria-label="Open assistant" data-icon="message" data-size="26"></button>
 <div id="chat">
-  <div id="chat-head"><span>🤖 PARA-PO assistant</span><button id="chat-close" aria-label="Close">✖</button></div>
+  <div id="chat-head"><span data-icon="message" data-size="18">PARA-PO assistant</span><button id="chat-close" aria-label="Close" data-icon="x" data-size="18"></button></div>
   <div id="chat-msgs"><div class="msg bot">Mabuhay! I know every barangay, school, mall and tourist spot in Zamboanga City. Ask me for places to visit, food to try, fares, or how to get somewhere. To see the route and live jeepneys for a trip, set your location and type your destination in "Where are you going?".</div></div>
   <div id="chips">
-    <button class="chip" data-q="What are the top tourist spots in Zamboanga City?">🌴 Top spots</button>
-    <button class="chip" data-q="Which beaches or islands can I visit near Zamboanga City?">🏝️ Beaches</button>
-    <button class="chip" data-q="What local food should I try in Zamboanga and where?">🍤 Where to eat</button>
-    <button class="chip" data-q="Plan a one-day tourist itinerary in Zamboanga City using jeepneys.">🗓️ Plan my day</button>
-    <button class="chip" data-q="How much is the jeepney fare and who gets a discount?">💸 Fares</button>
+    <button class="chip" data-q="What are the top tourist spots in Zamboanga City?" data-icon="star" data-size="13">Top spots</button>
+    <button class="chip" data-q="Which beaches or islands can I visit near Zamboanga City?" data-icon="sun" data-size="13">Beaches</button>
+    <button class="chip" data-q="What local food should I try in Zamboanga and where?" data-icon="utensils" data-size="13">Where to eat</button>
+    <button class="chip" data-q="Plan a one-day tourist itinerary in Zamboanga City using jeepneys." data-icon="calendar" data-size="13">Plan my day</button>
+    <button class="chip" data-q="How much is the jeepney fare and who gets a discount?" data-icon="dollar" data-size="13">Fares</button>
   </div>
   <form id="chat-form">
     <input id="chat-input" placeholder="Type a question" maxlength="500" autocomplete="off">
@@ -163,6 +199,38 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- icons (inline SVG, no extra downloads) ---------- */
+const ICONS = {
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  navigation: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
+  compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  crosshair: '<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+  pointer: '<path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+  bus: '<path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
+  message: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+  back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  bulb: '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+  bed: '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  dollar: '<line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'
+};
+const I = (name, size = 18) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+document.querySelectorAll('[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', I(el.dataset.icon, Number(el.dataset.size) || 18)));
+const plainLabel = s => String(s || '').replace(/^[^\p{L}\p{N}]+/u, '');   // category labels from the server may start with an emoji
+
 const routeLabel = r => (typeof r === 'string' && r) ? r : (r ? 'Custom route' : 'Not set');
 const routeId = r => (typeof r === 'string') ? r.trim().toUpperCase() : '';
 const DEFAULT_VIEW = [6.9273, 122.0588];
@@ -179,6 +247,7 @@ let me = null, meMarker = null, manualMode = false;
 let pinged = null, pendingPing = null, road = null;
 let boarded = null, boardSpot = null, boardedAt = null, boardFromMe = false;
 let plan = null, planLayers = [], planHtml = '';
+let routesLoading = false, routesPct = 100, rbHideTimer = null;
 
 function toast(msg, err) {
   const d = document.createElement('div');
@@ -199,12 +268,37 @@ socket.io.on('reconnect', () => {
   clearPing();
 });
 
+/* ---------- route data loading bar ---------- */
+// The server looks up each route stop once (and remembers it). This shows how far along that is.
+function showRouteProgress(p) {
+  if (!p) return;
+  const was = routesLoading;
+  routesLoading = !p.finished;
+  routesPct = Math.max(0, Math.min(100, Number(p.percent) || 0));
+  const bar = $('routebar');
+  clearTimeout(rbHideTimer);
+  if (!p.finished) {
+    bar.hidden = false; bar.classList.add('busy'); bar.setAttribute('aria-busy', 'true');
+    $('rb-label').textContent = `Loading route data · ${p.done}/${p.total} stops`;
+    $('rb-pct').textContent = routesPct + '%';
+    $('rb-fill').style.width = routesPct + '%';
+  } else if (!bar.hidden) {          // only celebrate if the person actually saw it loading
+    bar.classList.remove('busy'); bar.setAttribute('aria-busy', 'false');
+    $('rb-label').textContent = 'Route data ready';
+    $('rb-pct').textContent = '100%';
+    $('rb-fill').style.width = '100%';
+    rbHideTimer = setTimeout(() => { bar.hidden = true; }, 1500);
+  }
+  if (was !== routesLoading && !boarded) renderList();
+}
+socket.on('routes_progress', showRouteProgress);
+
 /* ---------- jeepney data ---------- */
 const goesThere = plate => !!plan && plan.routes.some(r => r.id === routeId(jeeps[plate]?.route));
 
 // Drivers can pick any listed route or type their own. The trip planner only understands listed routes.
 let catalog = null;   // Set of listed route ids, once loaded
-fetch('/api/routes').then(r => r.json()).then(j => { catalog = new Set((j.routes || []).map(x => x.id)); renderList(); }).catch(() => {});
+fetch('/api/routes').then(r => r.json()).then(j => { catalog = new Set((j.routes || []).map(x => x.id)); if (j.progress) showRouteProgress(j.progress); renderList(); }).catch(() => {});
 function routeKind(plate) {
   const id = routeId(jeeps[plate]?.route);
   if (!id || id === 'UNASSIGNED') return 'unset';
@@ -216,8 +310,8 @@ function iconFor(plate) {
   const full = status[plate]?.isFull;
   const dim = plan && !goesThere(plate);
   return L.divIcon({
-    html: `<div class="jeep-icon ${dim ? 'dim' : ''}"><div class="jeep-name ${full ? 'full' : ''}">${esc(plate)}${full ? ' · FULL' : ''}</div><div class="jeep-emoji">🚐</div></div>`,
-    iconSize: [90, 50], iconAnchor: [45, 40], className: ''
+    html: `<div class="jeep-icon ${dim ? 'dim' : ''}"><div class="jeep-name ${full ? 'full' : ''}">${esc(plate)}${full ? ' · FULL' : ''}</div><div class="jeep-badge ${full ? 'full' : ''}">${I('bus', 17)}</div></div>`,
+    iconSize: [90, 50], iconAnchor: [45, 38], className: ''
   });
 }
 
@@ -284,15 +378,15 @@ function cardFor(plate) {
   if (isPinged && road && road.len) { d = Math.round(road.len); how = 'by road'; } // same number as the map label
   let actions;
   if (isPinged) {
-    actions = `<div class="pair"><button class="btn red" data-act="cancel">Cancel ping</button><button class="btn solid" data-act="board" data-plate="${esc(plate)}">✅ I boarded</button></div>`;
+    actions = `<div class="pair"><button class="btn red" data-act="cancel">Cancel ping</button><button class="btn solid" data-act="board" data-plate="${esc(plate)}">${I('check', 15)} I boarded</button></div>`;
   } else {
-    actions = `<button class="btn green" data-act="ping" data-plate="${esc(plate)}" ${(s.isFull || isPending || pinged) ? 'disabled' : ''}>${isPending ? 'Pinging…' : s.isFull ? 'Jeepney is full' : '📢 Ping driver'}</button>
+    actions = `<button class="btn green" data-act="ping" data-plate="${esc(plate)}" ${(s.isFull || isPending || pinged) ? 'disabled' : ''}>${isPending ? 'Pinging…' : s.isFull ? 'Jeepney is full' : I('megaphone', 15) + ' Ping driver'}</button>
                ${!pinged ? `<button class="btn" data-act="board" data-plate="${esc(plate)}" ${s.isFull ? 'disabled' : ''}>I'm already on this jeepney</button>` : ''}`;
   }
   return `<div class="card ${isPinged ? 'pinged' : ''} ${way ? 'way' : ''}">
     <div class="card-top"><strong>${esc(plate)}</strong><span class="badge ${s.isFull ? 'full' : 'open'}">${s.isFull ? 'Full' : `${s.count}/${s.max} seats taken`}</span></div>
     <div class="meta">Route: ${esc(routeLabel(jeeps[plate].route))}${d !== null ? ` · ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'} ${how}` : ''}</div>
-    ${way ? '<div style="margin-top:6px"><span class="badge way">🧭 Goes your way</span></div>' : ''}
+    ${way ? `<div style="margin-top:6px"><span class="badge way">${I('navigation', 12)} Goes your way</span></div>` : ''}
     ${!way && routeKind(plate) === 'custom' ? '<div style="margin-top:6px"><span class="badge custom" title="The driver typed their own route, so we cannot tell if it goes your way">Driver\'s own route · not in route list</span></div>' : ''}
     ${!way && routeKind(plate) === 'unset' ? '<div style="margin-top:6px"><span class="badge custom">Route not set by driver</span></div>' : ''}
     ${isPinged ? '<div class="meta" style="color:var(--green)">Ping sent. Wait by the road and wave.</div>' : ''}
@@ -334,11 +428,11 @@ function checkNearby() {
 
 /* ---------- my location ---------- */
 function personIcon() {
-  return L.divIcon({ html: '<div style="font-size:30px;filter:drop-shadow(0 0 5px #a3e635)">🧍</div>', iconSize: [30, 30], className: '' });
+  return L.divIcon({ html: `<div class="pin-badge">${I('user', 16)}</div>`, iconSize: [30, 30], className: '' });
 }
 function boardIcon(t) {
   const hm = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="board-pin"><div class="tag">Boarded here · ${hm}</div><div class="pin">📍</div></div>` });
+  return L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="board-pin"><div class="tag">Boarded here · ${hm}</div><div class="pin">${I('pin', 30)}</div></div>` });
 }
 function decayMarker(m) { // fade the boarding pin out after the ride, then remove it
   const el = m.getElement() && m.getElement().querySelector('.board-pin');
@@ -501,7 +595,7 @@ function updateLine() {
   if (!road) road = new RoadLine(map, '#a3e635');
   road.update([j.lat, j.lon], me);
 }
-socket.on('ping_acknowledged', ({ plate }) => toast(`✅ Driver of ${plate} saw your request.`));
+socket.on('ping_acknowledged', ({ plate }) => toast(`Driver of ${plate} saw your request.`));
 socket.on('ping_expired', ({ plate, reason }) => {
   if (plate !== pinged) return;
   toast(reason === 'offline' ? `Jeepney ${plate} went offline.` : `Your ping to ${plate} expired. Ping again if you are still waiting.`, true);
@@ -519,7 +613,7 @@ function renderPlan() {
   let html = '';
   if (plan) {
     const online = id => Object.keys(jeeps).filter(p => routeId(jeeps[p].route) === id).length;
-    html = `<div class="plan"><div class="card-top"><strong>🏁 ${esc(plan.name)}</strong><button class="btn red" data-plan="clear" style="padding:4px 10px">Clear</button></div>`;
+    html = `<div class="plan"><div class="card-top"><strong class="plan-title">${I('flag', 16)} ${esc(plan.name)}</strong><button class="btn red" data-plan="clear" style="padding:4px 10px">Clear</button></div>`;
     if (plan.routes.length) {
       html += plan.routes.map((r, i) => {
         const n = online(r.id);
@@ -535,6 +629,7 @@ function renderPlan() {
     }
     const unknown = Object.keys(jeeps).filter(p => ['custom', 'unset'].includes(routeKind(p))).length;
     if (unknown) html += `<div class="meta" style="color:var(--amber)">${unknown} online jeepney${unknown > 1 ? 's use' : ' uses'} their own or no route, so we can't tell if ${unknown > 1 ? 'they go' : 'it goes'} your way. Check the route shown on the card.</div>`;
+    if (routesLoading) html += `<div class="meta" style="color:var(--amber)">Route data is still loading (${routesPct}%), so this list may be incomplete. Search again in a moment.</div>`;
     html += '<div class="note">Routes are a guide from the city route list. Confirm with the driver before you ride.</div></div>';
   }
   if (html !== planHtml) { planHtml = html; $('plan').innerHTML = html; }
@@ -543,7 +638,7 @@ $('plan').addEventListener('click', e => { if (e.target.closest('[data-plan="cle
 
 async function drawPlan() {
   const mine = plan;
-  planLayers.push(L.marker(mine.dest, { icon: L.divIcon({ html: '<div style="font-size:30px;filter:drop-shadow(0 0 5px #38bdf8)">🏁</div>', iconSize: [30, 30], iconAnchor: [6, 28], className: '' }) }).addTo(map).bindPopup(esc(mine.name)));
+  planLayers.push(L.marker(mine.dest, { icon: L.divIcon({ html: `<div class="pin-badge dest">${I('flag', 16)}</div>`, iconSize: [30, 30], className: '' }) }).addTo(map).bindPopup(esc(mine.name)));
   if (me) map.fitBounds(L.latLngBounds([me, mine.dest]).pad(0.3));
   for (const [i, rt] of mine.routes.slice(0, 3).entries()) {
     let pts = rt.path, dashed = true;
@@ -570,7 +665,7 @@ async function runPlan(q) {
     const to = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
     const r = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromLat: me[0], fromLon: me[1], toLat: to[0], toLon: to[1] }) });
     const j = await r.json();
-    if (!r.ok) return toast(j.error || 'Could not find a route right now.', true);
+    if (!r.ok) { if (j.progress) showRouteProgress(j.progress); return toast(j.error || 'Could not find a route right now.', true); }
     removePlanLayers();
     plan = { name: String(data[0].display_name || q).split(',')[0] || q, dest: to, routes: j.routes || [], servesDestination: j.servesDestination || [], servesOrigin: j.servesOrigin || [] };
     drawPlan();
@@ -581,7 +676,7 @@ async function runPlan(q) {
 
 /* ---------- tourist guide ---------- */
 let places = null, exploreCats = [], exploreOpen = false, exploreCat = 'all';
-const TYPE_ICON = { tourist: '📍', food: '🍤', stay: '🛏️', mall: '🛍️' };
+const TYPE_ICON = { tourist: 'pin', food: 'utensils', stay: 'bed', mall: 'bag' };
 async function loadPlaces() {
   if (places) return;
   try {
@@ -595,7 +690,7 @@ function toggleExplore(open) {
   $('explore').style.display = exploreOpen ? 'block' : 'none';
   $('list').style.display = exploreOpen ? 'none' : 'block';
   $('plan').style.display = exploreOpen ? 'none' : 'block';
-  $('explore-btn').textContent = exploreOpen ? '← Back to jeepneys' : '🌴 Explore Zamboanga (tourist guide)';
+  $('explore-btn').innerHTML = exploreOpen ? `${I('back', 16)} Back to jeepneys` : `${I('compass', 16)} Explore Zamboanga (tourist guide)`;
   if (exploreOpen) loadPlaces().then(renderExplore);
 }
 function renderExplore() {
@@ -604,15 +699,15 @@ function renderExplore() {
   const shown = places.filter(p => !cat.tags.length || p.tags.some(t => cat.tags.includes(t)));
   $('explore').innerHTML = `
     <div class="tips"><b>Riding a jeepney?</b> Say "Para po" to stop. Pass your fare forward to the driver and keep small bills and coins. Students, seniors and PWD pay 20% less. Emergency: 911.</div>
-    <div class="chips">${exploreCats.map(c => `<button class="chip ${c.id === exploreCat ? 'on' : ''}" data-ex="cat" data-id="${esc(c.id)}">${esc(c.label)}</button>`).join('')}</div>
-    <button class="btn solid" data-ex="day" style="width:100%;margin-bottom:12px">🗓️ Plan my day with the assistant</button>
+    <div class="chips">${exploreCats.map(c => `<button class="chip ${c.id === exploreCat ? 'on' : ''}" data-ex="cat" data-id="${esc(c.id)}">${esc(plainLabel(c.label))}</button>`).join('')}</div>
+    <button class="btn solid" data-ex="day" style="width:100%;margin-bottom:14px">${I('calendar', 15)} Plan my day with the assistant</button>
     ${shown.length ? shown.map(p => `<div class="card place">
-      <div class="card-top"><strong>${TYPE_ICON[p.type] || '📍'} ${esc(p.name)}</strong></div>
+      <div class="card-top"><strong class="pl-name">${I(TYPE_ICON[p.type] || 'pin', 16)}<span>${esc(p.name)}</span></strong></div>
       <div class="meta">${esc(p.blurb)}</div>
-      ${(p.tips || []).map(t => `<div class="tip">💡 ${esc(t)}</div>`).join('')}
+      ${(p.tips || []).map(t => `<div class="tip">${I('bulb', 13)}<span>${esc(t)}</span></div>`).join('')}
       <div class="pair">
-        <button class="btn green" data-ex="go" data-id="${esc(p.id)}">🧭 ${esc(p.goLabel || 'How do I get there?')}</button>
-        <button class="btn" data-ex="ask" data-id="${esc(p.id)}">💬 Ask</button>
+        <button class="btn green" data-ex="go" data-id="${esc(p.id)}">${I('navigation', 14)} ${esc(p.goLabel || 'How do I get there?')}</button>
+        <button class="btn" data-ex="ask" data-id="${esc(p.id)}">${I('message', 14)} Ask</button>
       </div></div>`).join('') : '<div class="empty">Nothing in this category yet.</div>'}
     <div class="meta" style="font-size:11px">Details can change. Confirm boats, events and rates with the City Tourism Office or the operator.</div>`;
 }
