@@ -120,19 +120,35 @@ function log(msg) {
 }
 
 /* ---------- route list (from the server) ---------- */
+const OTHER = '__other__';
+const cleanRouteName = s => String(s || '').replace(/[^A-Za-z0-9 .,'&()\/-]/g, '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 40);
+// the server's routes, plus any custom route in use, plus "type your own"
+function routeOptionsHtml(current) {
+  const ids = (typeof current === 'string' && current && !ROUTES.includes(current)) ? [current, ...ROUTES] : ROUTES;
+  return ids.map(r => `<option ${current === r ? 'selected' : ''}>${esc(r)}</option>`).join('') + `<option value="${OTHER}">Other (type your own)…</option>`;
+}
+// returns the chosen route name, or null if the admin cancelled
+function askCustomRoute() {
+  const name = cleanRouteName(prompt('Type the route name (for example: SAN ROQUE - DIVISORIA).') || '');
+  return name || null;
+}
+function fillNewRouteSelect(value) { $('route').innerHTML = routeOptionsHtml(value); $('route').value = value; }
 async function loadRoutes() {
   try {
     const r = await fetch('/api/routes');
     const j = await r.json();
-    if (!j.routes || !j.routes.length) return;
-    ROUTES = [...j.routes.map(x => x.id), 'UNASSIGNED'];
-    const cur = $('route').value;
-    $('route').innerHTML = ROUTES.map(id => `<option>${esc(id)}</option>`).join('');
-    $('route').value = ROUTES.includes(cur) ? cur : ROUTES[0];
-    renderJeeps();
+    if (j.routes && j.routes.length) ROUTES = [...j.routes.map(x => x.id), 'UNASSIGNED'];
   } catch { /* keep the built-in list */ }
+  fillNewRouteSelect(ROUTES.includes($('route').value) ? $('route').value : ROUTES[0]);
+  renderJeeps();
 }
 loadRoutes();
+let newRoutePrev = 'AYALA';
+$('route').onfocus = () => { newRoutePrev = $('route').value; };
+$('route').onchange = () => {
+  if ($('route').value !== OTHER) return;
+  fillNewRouteSelect(askCustomRoute() || newRoutePrev);
+};
 
 /* ---------- auth ---------- */
 const tok = { get() { try { return sessionStorage.getItem('adminToken') || ''; } catch { return ''; } }, set(v) { try { sessionStorage.setItem('adminToken', v); } catch {} } };
@@ -331,11 +347,10 @@ function renderJeeps() {
     const s = status[plate] || { count: 0, max: 20, isFull: false, manualFull: false };
     const a = alerts[plate];
     const cur = testJeeps[plate].route;
-    const routeOpts = (typeof cur === 'string' && cur && !ROUTES.includes(cur)) ? [cur, ...ROUTES] : ROUTES; // keep an unlisted route selectable
     return `<div class="item ${a ? 'alerting' : ''}" data-plate="${esc(plate)}">
       <div class="head"><b>🚐 ${esc(plate)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div>
       <div class="row">
-        <select data-act="route" aria-label="Route">${routeOpts.map(r => `<option ${cur === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+        <select data-act="route" aria-label="Route">${routeOptionsHtml(cur)}</select>
         <button class="btn sm" data-act="minus" aria-label="One fewer passenger">−</button>
         <button class="btn sm" data-act="plus" aria-label="One more passenger">+</button>
         <button class="btn sm ${s.manualFull ? 'warn' : ''}" data-act="full">${s.manualFull ? 'Reopen' : 'Mark full'}</button>
@@ -360,7 +375,13 @@ $('jeeps').addEventListener('click', e => {
 });
 $('jeeps').addEventListener('change', e => {
   const s = e.target.closest('select[data-act]'); if (!s) return;
-  jeepAction(s.closest('[data-plate]').dataset.plate, 'route', s.value);
+  const plate = s.closest('[data-plate]').dataset.plate;
+  if (s.value === OTHER) {
+    const name = askCustomRoute();
+    if (!name) { renderJeeps(); return; }   // cancelled: put the dropdown back
+    return jeepAction(plate, 'route', name);
+  }
+  jeepAction(plate, 'route', s.value);
 });
 
 function addTestJeep(d) {
