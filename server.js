@@ -88,6 +88,148 @@ function getDistance(lat1, lon1, lat2, lon2) { // Haversine, meters (straight-li
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ==================== ROUTE CATALOG ====================
+// STARTER DATA: each route is a list of named stops. Stop coordinates are looked up from OpenStreetMap
+// (Nominatim) at startup and cached in .geocache.json, so nothing here is hand-typed GPS.
+// Edit this list to match the real LTFRB / city route franchises. A route is drawn as a line from
+// ROUTE_ANCHOR (downtown) out through its stops, ordered by distance from the anchor.
+// Keep ids short and unique; drivers pick them from a dropdown. 'UNASSIGNED' is added by the pages.
+const ROUTE_ANCHOR = 'Plaza Pershing';
+const ROUTE_CATALOG = [
+    { id: 'AYALA', stops: ['Ayala'] },
+    { id: 'SINNUNUC', stops: ['Sinunuc'] },
+    { id: 'CANELAR', stops: ['Canelar'] },
+    { id: 'GUIWAN', stops: ['Guiwan'] },
+    { id: 'TUMAGA', stops: ['Tumaga'] },
+    { id: 'BALIWASAN', stops: ['Baliwasan', 'Western Mindanao State University'] },
+    { id: 'PASONANCA', stops: ['Pasonanca'] },
+    { id: 'PUTIK', stops: ['Putik'] },
+    { id: 'STA MARIA', stops: ['Santa Maria'] },
+    { id: 'SAN ROQUE', stops: ['San Roque'] },
+    { id: 'CALARIAN', stops: ['Calarian'] },
+    { id: 'TETUAN', stops: ['Tetuan', 'KCC Mall de Zamboanga'] },
+    { id: 'MERCEDES', stops: ['Mercedes'] },
+    { id: 'TALISAYAN', stops: ['Talisayan'] },
+    { id: 'RECODO', stops: ['Recodo'] },
+    { id: 'CAWIT', stops: ['Cawit'] },
+    { id: 'AIRPORT', stops: ['Zamboanga International Airport'] }
+];
+
+const GEO_CACHE_FILE = path.join(__dirname, '.geocache.json');
+let geoCache = {};
+try { geoCache = JSON.parse(fs.readFileSync(GEO_CACHE_FILE, 'utf8')) || {}; } catch { geoCache = {}; }
+let routesReady = false;
+const routePaths = {}; // id -> { path: [[lat, lon], ...], names: [stop names in path order, anchor excluded] }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function geocodeStop(name) {
+    if (geoCache[name]) return geoCache[name];
+    try {
+        const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&bounded=1' +
+            '&viewbox=121.85,7.25,122.35,6.85&q=' + encodeURIComponent(name + ', Zamboanga City');
+        const r = await fetch(url, { headers: { 'User-Agent': 'PARA-PO/1.0 (jeepney tracker)' }, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) return null;
+        const j = await r.json();
+        if (!Array.isArray(j) || !j.length) return null;
+        const lat = parseFloat(j[0].lat), lon = parseFloat(j[0].lon);
+        if (!validCoords(lat, lon)) return null;
+        geoCache[name] = { lat, lon };
+        return geoCache[name];
+    } catch (e) {
+        console.warn('[routes] geocode failed for', name, e.message);
+        return null;
+    }
+}
+
+async function buildRoutePaths() {
+    const names = new Set([ROUTE_ANCHOR]);
+    for (const r of ROUTE_CATALOG) for (const s of r.stops) names.add(s);
+
+    let fetched = false, missing = 0;
+    for (const n of names) {
+        const cached = !!geoCache[n];
+        const g = await geocodeStop(n);
+        if (!g) missing += 1;
+        if (!cached) { fetched = fetched || !!g; await sleep(1100); } // Nominatim allows ~1 request/second
+    }
+    if (fetched) { try { fs.writeFileSync(GEO_CACHE_FILE, JSON.stringify(geoCache)); } catch { /* read-only disk is fine */ } }
+
+    const anchor = geoCache[ROUTE_ANCHOR];
+    for (const r of ROUTE_CATALOG) {
+        const entries = r.stops.filter(s => geoCache[s]).map(s => ({ name: s, lat: geoCache[s].lat, lon: geoCache[s].lon }));
+        if (anchor) entries.sort((a, b) => getDistance(anchor.lat, anchor.lon, a.lat, a.lon) - getDistance(anchor.lat, anchor.lon, b.lat, b.lon));
+        const pts = entries.map(e => [e.lat, e.lon]);
+        const pathPts = anchor ? [[anchor.lat, anchor.lon], ...pts] : pts;
+        if (pathPts.length >= 2) routePaths[r.id] = { path: pathPts, names: entries.map(e => e.name) };
+        else delete routePaths[r.id];
+    }
+    routesReady = Object.keys(routePaths).length > 0;
+    console.log(`[routes] ${Object.keys(routePaths).length}/${ROUTE_CATALOG.length} routes ready` + (missing ? `, ${missing} stop(s) could not be located` : ''));
+    if (missing) setTimeout(() => buildRoutePaths().catch(e => console.error('[routes]', e)), 10 * 60 * 1000).unref(); // retry later
+}
+buildRoutePaths().catch(e => console.error('[routes]', e));
+
+// distance from a point to a polyline (meters) and how far along the polyline the closest point is
+function projectOnPath(pathPts, lat, lon) {
+    const mx = 111320 * Math.cos(lat * Math.PI / 180), my = 110540;
+    let best = { dist: Infinity, along: 0 }, acc = 0;
+    for (let i = 1; i < pathPts.length; i++) {
+        const a = pathPts[i - 1], b = pathPts[i];
+        const segLen = getDistance(a[0], a[1], b[0], b[1]);
+        const ax = (a[1] - lon) * mx, ay = (a[0] - lat) * my;
+        const dx = (b[1] - lon) * mx - ax, dy = (b[0] - lat) * my - ay;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        const d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (d < best.dist) best = { dist: d, along: acc + segLen * t };
+        acc += segLen;
+    }
+    return best;
+}
+
+const ROUTE_TOLERANCE_M = 1200;   // stops are coarse, so allow some slack between a point and the drawn line
+const MIN_RIDE_M = 300;           // origin and destination must be at least this far apart along the route
+
+const planLimiter = makeLimiter(20, 60 * 1000);
+
+app.get('/api/routes', (req, res) => {
+    res.json({ ready: routesReady, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
+});
+
+app.post('/api/plan', (req, res) => {
+    if (!planLimiter(req.ip)) return res.status(429).json({ error: 'Too many searches. Please wait a moment.' });
+    const b = req.body || {};
+    const fromLat = Number(b.fromLat), fromLon = Number(b.fromLon), toLat = Number(b.toLat), toLon = Number(b.toLon);
+    if (!validCoords(fromLat, fromLon) || !validCoords(toLat, toLon)) return res.status(400).json({ error: 'Invalid coordinates.' });
+    if (!routesReady) return res.status(503).json({ error: 'Route data is still loading. Try again in a minute.' });
+
+    const matches = [], servesDestination = [], servesOrigin = [];
+    for (const r of ROUTE_CATALOG) {
+        const rp = routePaths[r.id];
+        if (!rp) continue;
+        const o = projectOnPath(rp.path, fromLat, fromLon);
+        const d = projectOnPath(rp.path, toLat, toLon);
+        if (d.dist <= ROUTE_TOLERANCE_M) servesDestination.push({ id: r.id, distM: Math.round(d.dist) });
+        if (o.dist <= ROUTE_TOLERANCE_M) servesOrigin.push({ id: r.id, distM: Math.round(o.dist) });
+        if (o.dist <= ROUTE_TOLERANCE_M && d.dist <= ROUTE_TOLERANCE_M && Math.abs(o.along - d.along) >= MIN_RIDE_M) {
+            matches.push({
+                id: r.id,
+                stops: rp.names,
+                walkToBoardM: Math.round(o.dist),
+                walkFromAlightM: Math.round(d.dist),
+                rideM: Math.round(Math.abs(o.along - d.along)),
+                towards: d.along > o.along ? rp.names[rp.names.length - 1] : ROUTE_ANCHOR,
+                path: rp.path
+            });
+        }
+    }
+    matches.sort((a, b) => (a.walkToBoardM + a.walkFromAlightM) - (b.walkToBoardM + b.walkFromAlightM));
+    servesDestination.sort((a, b) => a.distM - b.distM);
+    servesOrigin.sort((a, b) => a.distM - b.distM);
+    res.json({ routes: matches.slice(0, 5), servesDestination: servesDestination.slice(0, 4), servesOrigin: servesOrigin.slice(0, 4) });
+});
+
 // ==================== FARE + DISTANCE (server-side, so the AI never does the math) ====================
 function computeFare(km, modern) {
     const base = modern ? 17 : 14;
@@ -104,11 +246,25 @@ const DISTANCES_FROM_KCC = [
     { label: 'SM City Mindpro', aliases: ['sm city mindpro', 'sm mindpro', 'mindpro'], km: 0.5 }
 ];
 
+function escRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function buildRouteHint(text) {
+    const lines = [];
+    for (const r of ROUTE_CATALOG) {
+        const terms = [r.id.toLowerCase(), ...r.stops.map(s => s.toLowerCase())];
+        if (terms.some(t => new RegExp('\\b' + escRegex(t) + '\\b').test(text))) {
+            lines.push(`Route ${r.id} serves: ${r.stops.join(', ')}.`);
+        }
+        if (lines.length >= 5) break;
+    }
+    return lines;
+}
+
 function buildVerifiedHint(message) {
     const text = message.toLowerCase();
     const lines = [];
     for (const d of DISTANCES_FROM_KCC) {
-        if (d.aliases.some(a => new RegExp('\\b' + a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(text))) {
+        if (d.aliases.some(a => new RegExp('\\b' + escRegex(a) + '\\b').test(text))) {
             lines.push(`${d.label} to KCC Mall: ${d.km} km. Traditional fare PHP ${computeFare(d.km, false)}, modern fare PHP ${computeFare(d.km, true)}.`);
         }
     }
@@ -117,9 +273,12 @@ function buildVerifiedHint(message) {
         const km = Math.min(parseFloat(m[1]), 200);
         lines.push(`For ${km} km: traditional fare PHP ${computeFare(km, false)}, modern fare PHP ${computeFare(km, true)}.`);
     }
-    return lines.length
+    let out = lines.length
         ? '\n\nSERVER-VERIFIED FIGURES FOR THIS QUESTION (use these exactly, do not recalculate):\n' + lines.join('\n')
         : '';
+    const routeLines = buildRouteHint(text);
+    if (routeLines.length) out += '\n\nSERVER-VERIFIED ROUTE MATCHES FOR THIS QUESTION:\n' + routeLines.join('\n');
+    return out;
 }
 
 function toPlainText(t) {
@@ -146,8 +305,11 @@ RULES:
 3. If asked about a location, use the database below.
 4. For distances, use ONLY the verified matrix or the SERVER-VERIFIED FIGURES section if present. If a distance is not listed, say you do not have a verified distance for it and suggest checking the route on the PARA-PO map. Never guess a number.
 5. For fares, use ONLY figures given in SERVER-VERIFIED FIGURES. If none are given, explain the fare rules and ask for the distance. Never calculate fares yourself.
-6. You do not have verified jeepney route or schedule data. If asked which jeepney to ride, say so and point to the live map and the route shown on each jeepney.
+6. You have a ROUTE CATALOG below (route names and the places they serve). You do NOT have schedules, exact roads, or which jeepneys are online. When asked which jeepney to ride, name routes only from the catalog or the SERVER-VERIFIED ROUTE MATCHES section, say the catalog is a guide, and tell the commuter to type the destination in the "Where are you going?" box on the PARA-PO map to see the route and the jeepneys on it live. If the place is not in the catalog, say so and point to that box.
 7. Students, senior citizens and persons with disabilities are entitled to a 20 percent fare discount on public transport. Mention it when relevant.
+
+ROUTE CATALOG (route name: places served, starting from downtown):
+${ROUTE_CATALOG.map(r => `- ${r.id}: ${r.stops.join(', ')}`).join('\n')}
 
 ZAMBOANGA CITY LANDMARK DATABASE:
 Malls: KCC Mall de Zamboanga, SM City Mindpro, City Mall Tetuan, Southway Square, Canelar Barter Trade.
@@ -209,7 +371,7 @@ const pageFile = (name) => {
     return fs.existsSync(inPublic) ? inPublic : path.join(__dirname, name);
 };
 
-app.get('/health', (req, res) => res.json({ ok: true, jeepneys: Object.keys(activeJeepneys).length }));
+app.get('/health', (req, res) => res.json({ ok: true, jeepneys: Object.keys(activeJeepneys).length, routesReady }));
 app.get('/', (req, res) => res.sendFile(pageFile('index.html')));
 app.get('/driver', (req, res) => res.sendFile(pageFile('driver.html')));
 app.get(ADMIN_PATH, (req, res) => res.sendFile(pageFile('admin.html')));
@@ -229,7 +391,7 @@ let activeJeepneys = {};   // plate -> { plate, lat, lon, route, lastSeen, ... }
 let testJeepneys = {};
 let testPassengers = {};   // id -> { id, lat, lon, boarded: plate|null, pingPlate: plate|null }
 let jeepneyStatus = {};    // plate -> { count, max, isFull, manualFull }
-let activePings = {};      // plate -> Map(key -> { passLat, passLon, at, testId? }); key = socketId, or "test:<id>" for test passengers
+let activePings = {};      // plate -> Map(key -> { passLat, passLon, at, ack, testId? }); key = socketId, or "test:<id>" for test passengers
 let testSeq = 0;
 
 const isTestPlate = (plate) => String(plate).startsWith('TEST-');
@@ -256,12 +418,34 @@ function getAnyJeepney(plate, socket) {
     return null;
 }
 
-// ---- test passenger helpers (used by the admin demo console) ----
+// ---- ping helpers ----
+// Pings stay on the books after the driver acknowledges them (ack = true) so the driver keeps the
+// passenger's location on the map until the passenger boards, cancels, or the ping expires.
+function unackedCount(plate) {
+    const m = activePings[plate];
+    if (!m) return 0;
+    let n = 0;
+    for (const p of m.values()) if (!p.ack) n += 1;
+    return n;
+}
+
+function pingId(key, p) {
+    return p.testId || crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 8); // never expose socket ids
+}
+
+// send the driver the current list of waiting passengers so the driver hub can draw the road line
+function emitDriverPings(plate) {
+    const m = activePings[plate];
+    const passengers = m ? [...m].map(([key, p]) => ({ id: pingId(key, p), lat: p.passLat, lon: p.passLon, ack: !!p.ack })) : [];
+    io.to(`driver:${plate}`).emit('driver_pings', { plate, passengers });
+}
+
 function pushTestPassenger(p) { emitTest('test_passenger_update', p); }
 
 function emitPingCancelled(plate, remaining) {
     io.to(`driver:${plate}`).emit('ping_cancelled', { plate, remaining });
     if (isTestPlate(plate)) io.to('admin').emit('ping_cancelled', { plate, remaining }); // test jeepneys are "driven" from the admin console
+    emitDriverPings(plate);
 }
 
 function dropPing(plate, key) {
@@ -269,7 +453,7 @@ function dropPing(plate, key) {
     if (!m) return 0;
     m.delete(key);
     if (m.size === 0) delete activePings[plate];
-    return m.size;
+    return unackedCount(plate);
 }
 
 function cancelTestPing(id) {
@@ -423,8 +607,9 @@ io.on('connection', (socket) => {
             if (testJeepneys[plate]) socket.emit('test_jeepney_update', testJeepneys[plate]);
             if (jeepneyStatus[plate]) socket.emit('status_update', { plate, status: jeepneyStatus[plate] });
             // deliver any passengers already waiting
-            const waiting = activePings[plate]?.size || 0;
+            const waiting = unackedCount(plate);
             if (waiting) socket.emit('driver_alert', { plate, message: `${waiting} passenger(s) waiting for you!`, count: waiting });
+            if (activePings[plate]) emitDriverPings(plate);
         }
         if (typeof cb === 'function') cb({ ok });
     });
@@ -481,17 +666,14 @@ io.on('connection', (socket) => {
         const pings = activePings[plate];
         if (!pings) return;
         for (const [key, p] of pings) {
-            if (p.testId) {
-                const tp = testPassengers[p.testId];
-                if (tp && tp.pingPlate === plate) { tp.pingPlate = null; pushTestPassenger(tp); }
-                io.to('admin').emit('test_ping_acknowledged', { plate, id: p.testId });
-            } else {
-                io.to(key).emit('ping_acknowledged', { plate });
-            }
+            if (p.ack) continue; // already acknowledged earlier
+            p.ack = true;        // keep the ping: the driver still needs the passenger's location
+            if (p.testId) io.to('admin').emit('test_ping_acknowledged', { plate, id: p.testId });
+            else io.to(key).emit('ping_acknowledged', { plate });
         }
-        delete activePings[plate];
         io.to(`driver:${plate}`).emit('alert_cleared', { plate });
         if (isTestPlate(plate)) io.to('admin').emit('alert_cleared', { plate });
+        emitDriverPings(plate);
     });
 
     // ---- passenger events ----
@@ -505,6 +687,10 @@ io.on('connection', (socket) => {
         if (s.count >= s.max) {
             socket.emit('board_rejected', { plate, reason: 'full' });
             return;
+        }
+        // a passenger who boards no longer needs any ping they had open
+        for (const pl of Object.keys(activePings)) {
+            if (activePings[pl].has(socket.id)) emitPingCancelled(pl, dropPing(pl, socket.id));
         }
         s.count += 1;
         socket.data.boardedPlate = plate;
@@ -537,14 +723,15 @@ io.on('connection', (socket) => {
         }
 
         if (!activePings[plate]) activePings[plate] = new Map();
-        activePings[plate].set(socket.id, { passLat, passLon, at: Date.now() });
-        const waiting = activePings[plate].size;
+        activePings[plate].set(socket.id, { passLat, passLon, at: Date.now(), ack: false });
+        const waiting = unackedCount(plate);
 
         const reachable = alertDriver(plate, {
             plate,
             count: waiting,
             message: `Passenger waiting ${Math.round(dist)} meters away!` + (waiting > 1 ? ` (${waiting} passengers waiting)` : '')
         });
+        emitDriverPings(plate);
         io.to('admin').emit('admin_route_to_passenger', { plate, passLat, passLon });
         socket.emit('ping_sent', { plate, distance: dist, driverOnline: reachable });
     });
@@ -589,6 +776,7 @@ io.on('connection', (socket) => {
         delete testJeepneys[plate];
         delete jeepneyStatus[plate];
         delete activePings[plate];
+        emitDriverPings(plate);
         emitTest('test_jeepney_deleted', plate);
     });
 
@@ -608,6 +796,8 @@ io.on('connection', (socket) => {
         const p = testPassengers[id];
         if (!p || p.boarded || !validCoords(lat, lon)) return;
         p.lat = lat; p.lon = lon;
+        const ping = p.pingPlate && activePings[p.pingPlate]?.get(`test:${id}`);
+        if (ping) { ping.passLat = lat; ping.passLon = lon; emitDriverPings(p.pingPlate); } // driver line follows the moved passenger
         pushTestPassenger(p);
     });
 
@@ -639,16 +829,17 @@ io.on('connection', (socket) => {
 
         cancelTestPing(id); // one active ping per passenger
         if (!activePings[plate]) activePings[plate] = new Map();
-        activePings[plate].set(`test:${id}`, { passLat: p.lat, passLon: p.lon, at: Date.now(), testId: id });
+        activePings[plate].set(`test:${id}`, { passLat: p.lat, passLon: p.lon, at: Date.now(), ack: false, testId: id });
         p.pingPlate = plate;
         pushTestPassenger(p);
-        const waiting = activePings[plate].size;
+        const waiting = unackedCount(plate);
 
         const reachable = alertDriver(plate, {
             plate,
             count: waiting,
             message: `Passenger waiting ${Math.round(dist)} meters away!` + (waiting > 1 ? ` (${waiting} passengers waiting)` : '')
         });
+        emitDriverPings(plate);
         io.to('admin').emit('admin_route_to_passenger', { plate, passLat: p.lat, passLon: p.lon, passengerId: id });
         reply({ ok: true, distance: dist, driverOnline: reachable });
     });
@@ -696,6 +887,7 @@ io.on('connection', (socket) => {
         for (const plate of Object.keys(testJeepneys)) {
             io.to(`driver:${plate}`).emit('test_jeepney_deleted', plate);
             delete jeepneyStatus[plate]; delete activePings[plate];
+            emitDriverPings(plate);
         }
         testJeepneys = {};
         testPassengers = {};
@@ -728,19 +920,28 @@ const sweeper = setInterval(() => {
             detachFromJeepney(plate);
             for (const [key, p] of (activePings[plate] || [])) notifyPingEnd(plate, key, p, 'offline');
             delete activePings[plate];
+            emitDriverPings(plate);
             io.emit('jeepney_removed', plate);
         }
     }
 
     // pings nobody answered
     for (const plate of Object.keys(activePings)) {
+        let removed = false;
         for (const [key, p] of activePings[plate]) {
             if (now - p.at > PING_TTL_MS) {
                 notifyPingEnd(plate, key, p, 'timeout');
                 activePings[plate].delete(key);
+                removed = true;
             }
         }
         if (activePings[plate].size === 0) delete activePings[plate];
+        if (removed) {
+            const remaining = unackedCount(plate);
+            io.to(`driver:${plate}`).emit('ping_cancelled', { plate, remaining });
+            if (isTestPlate(plate)) io.to('admin').emit('ping_cancelled', { plate, remaining });
+            emitDriverPings(plate);
+        }
     }
 }, 15 * 1000);
 sweeper.unref();
