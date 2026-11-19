@@ -48,6 +48,8 @@ input:focus,select:focus{border-color:var(--green)}
 #full-note{font-size:13px;color:var(--dim);text-align:center;margin-top:-6px;min-height:16px}
 #end{background:none;border:1px solid #444;color:var(--dim);padding:12px 20px;border-radius:10px;cursor:pointer;font-size:14px}
 #err{width:100%;max-width:560px;display:none;background:rgba(251,191,36,.12);border:1px solid var(--amber);color:#fde68a;padding:12px 14px;border-radius:10px;font-size:14px}
+.road-label-wrap{background:none;border:none}
+.road-label{transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;color:#000;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px;border:2px solid #0b0b0b;box-shadow:0 4px 12px rgba(0,0,0,.55)}
 @keyframes flash{50%{opacity:.6}}
 @media(prefers-reduced-motion:reduce){#alert-msg{animation:none}}
 </style>
@@ -101,6 +103,7 @@ input:focus,select:focus{border-color:var(--green)}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const socket = io();
 const map = L.map('map', { zoomControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false }).setView([6.9273, 122.0588], 17);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
@@ -111,6 +114,8 @@ let plate = null, key = '', route = 'UNASSIGNED';
 let watchId = null, sendTimer = null, lastPos = null, lastSent = 0, wakeLock = null;
 let st = { count: 0, max: 20, isFull: false, manualFull: false };
 let active = false, testMode = false;
+let pings = [];                       // waiting passengers: [{ id, lat, lon, ack }]
+const lines = {}, pingMarkers = {};   // by passenger id
 
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -125,6 +130,24 @@ function say(text) {
   speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
+
+/* ---------- route list (from the server) ---------- */
+async function loadRoutes() {
+  try {
+    const r = await fetch('/api/routes');
+    const j = await r.json();
+    if (!j.routes || !j.routes.length) return;
+    const ids = ['UNASSIGNED', ...j.routes.map(x => x.id)];
+    for (const sel of [$('route-login'), $('route')]) {
+      const cur = sel.value;
+      sel.innerHTML = ids.map(id => `<option>${esc(id)}</option>`).join('');
+      sel.value = ids.includes(cur) ? cur : 'UNASSIGNED';
+    }
+    const saved = store.get('driverRoute');
+    if (saved && ids.includes(saved)) $('route-login').value = saved;
+  } catch { /* keep the built-in options */ }
+}
+loadRoutes();
 
 /* ---------- sign-in ---------- */
 function register(cb) {
@@ -169,6 +192,120 @@ socket.on('connect', () => { loadTests(); if (active) register(ok => { if (!ok) 
 socket.on('disconnect', () => { if (active) showErr('Connection lost. Reconnecting…'); });
 socket.io.on('reconnect', () => showErr(''));
 
+/* ---------- road-following line with distance/time label ---------- */
+function hav(a, b) {
+  const R = 6371e3, r = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+function pathLen(pts) { let t = 0; for (let i = 1; i < pts.length; i++) t += hav(pts[i - 1], pts[i]); return t; }
+function pointAt(pts, target) {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const seg = hav(pts[i - 1], pts[i]);
+    if (seg > 0 && acc + seg >= target) {
+      const f = (target - acc) / seg;
+      return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f];
+    }
+    acc += seg;
+  }
+  return pts[pts.length - 1];
+}
+const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+
+// Keep only the part of the fetched road that is still AHEAD of the vehicle, so the remaining distance
+// only shrinks as the jeepney approaches (instead of doubling back to where the road was fetched).
+function trimFrom(coords, p) {
+  if (coords.length < 2) return coords;
+  const mx = 111320 * Math.cos(p[0] * Math.PI / 180), my = 110540;
+  let best = Infinity, bi = 1, bp = coords[0];
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1], b = coords[i];
+    const ax = (a[1] - p[1]) * mx, ay = (a[0] - p[0]) * my;
+    const dx = (b[1] - p[1]) * mx - ax, dy = (b[0] - p[0]) * my - ay;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (d < best) { best = d; bi = i; bp = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+  }
+  return [bp, ...coords.slice(bi)];
+}
+
+class RoadLine {
+  constructor(map, color, tag) {
+    this.map = map; this.color = color; this.tag = tag || '';
+    const base = { lineCap: 'round', lineJoin: 'round', interactive: false };
+    this.casing = L.polyline([], { ...base, color: '#0b0b0b', weight: 13, opacity: .9 });
+    this.line = L.polyline([], { ...base, color, weight: 7, opacity: 1 });
+    this.label = L.marker([0, 0], { interactive: false, keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'road-label-wrap', html: '', iconSize: [0, 0] }) });
+    this.road = null; this.shown = false; this.pending = false; this.fetchedAt = 0; this.fa = null; this.fb = null; this.token = 0; this.len = 0;
+  }
+  update(a, b) {            // a: jeepney [lat, lon], b: passenger [lat, lon]
+    this.a = a; this.b = b;
+    if (!this.shown) { this.casing.addTo(this.map); this.line.addTo(this.map); this.label.addTo(this.map); this.shown = true; }
+    const moved = !this.fa || hav(a, this.fa) > 15 || hav(b, this.fb) > 15;
+    if (!this.pending && Date.now() - this.fetchedAt > 4000 && (moved || !this.road)) this.fetchRoad();
+    this.draw();
+  }
+  async fetchRoad() {
+    const tok = this.token, a = this.a, b = this.b;
+    this.pending = true; this.fetchedAt = Date.now(); this.fa = a; this.fb = b;
+    try {
+      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`);
+      const j = await r.json();
+      if (tok === this.token && j.routes && j.routes[0]) {
+        const rt = j.routes[0];
+        this.road = { coords: rt.geometry.coordinates.map(c => [c[1], c[0]]), distance: rt.distance, duration: rt.duration };
+        this.draw();
+      }
+    } catch (e) { console.error('Routing error', e); }
+    if (tok === this.token) this.pending = false;
+  }
+  draw() {
+    if (!this.shown) return;
+    const hasRoad = !!this.road;
+    const pts = hasRoad ? [this.a, ...trimFrom(this.road.coords, this.a), this.b] : [this.a, this.b];
+    const len = pathLen(pts);
+    this.len = len;
+    const secs = hasRoad ? len * (this.road.duration / Math.max(this.road.distance, 1)) : len / 5.55; // fallback ~20 km/h
+    this.casing.setLatLngs(pts);
+    this.line.setLatLngs(pts);
+    this.line.setStyle({ dashArray: hasRoad ? null : '12,12' });
+    const mins = Math.max(1, Math.ceil(secs / 60));
+    const text = `${esc(this.tag)}${hasRoad ? '' : '~'}${mins} min · ${fmtDist(len)}${hasRoad ? '' : ' (straight line)'}`;
+    this.label.setLatLng(pointAt(pts, len / 2)).setIcon(L.divIcon({ className: 'road-label-wrap', iconSize: [0, 0], html: `<div class="road-label" style="background:${this.color}">${text}</div>` }));
+  }
+  clear() {
+    this.token++; this.pending = false; this.road = null; this.fetchedAt = 0; this.fa = this.fb = null; this.len = 0;
+    if (this.shown) { this.map.removeLayer(this.casing); this.map.removeLayer(this.line); this.map.removeLayer(this.label); }
+    this.shown = false;
+  }
+}
+
+/* ---------- waiting passengers on the map ---------- */
+const personIcon = L.divIcon({ html: '<div style="font-size:30px;filter:drop-shadow(0 0 5px #fbbf24)">🧍</div>', iconSize: [30, 30], iconAnchor: [15, 15], className: '' });
+function syncPings() {
+  for (const id of Object.keys(lines)) {
+    if (!pings.some(p => p.id === id)) { lines[id].clear(); delete lines[id]; }
+  }
+  for (const id of Object.keys(pingMarkers)) {
+    if (!pings.some(p => p.id === id)) { map.removeLayer(pingMarkers[id]); delete pingMarkers[id]; }
+  }
+  for (const p of pings) {
+    if (pingMarkers[p.id]) pingMarkers[p.id].setLatLng([p.lat, p.lon]);
+    else pingMarkers[p.id] = L.marker([p.lat, p.lon], { icon: personIcon }).addTo(map);
+    if (!lastPos) continue;
+    if (!lines[p.id]) lines[p.id] = new RoadLine(map, '#fbbf24', '');
+    lines[p.id].update([lastPos.lat, lastPos.lon], [p.lat, p.lon]);
+  }
+}
+socket.on('driver_pings', d => {
+  if (d.plate !== plate) return;
+  pings = Array.isArray(d.passengers) ? d.passengers : [];
+  if (lastPos) drawMe(); else syncPings();
+});
+
 /* ---------- GPS -> server ---------- */
 function setGps(state) { $('gps-dot').className = state; }
 function startGps() {
@@ -199,11 +336,13 @@ async function send() {
 }
 function drawMe() {
   const ll = [lastPos.lat, lastPos.lon];
-  map.setView(ll, 17);
+  if (pings.length) map.fitBounds(L.latLngBounds([ll, ...pings.map(p => [p.lat, p.lon])]).pad(0.3), { maxZoom: 17, animate: false });
+  else map.setView(ll, 17);
   if (marker) marker.setLatLng(ll);
   else marker = L.marker(ll, { icon: L.divIcon({ html: '<div style="font-size:40px;filter:drop-shadow(0 0 10px #a3e635)">🚐</div>', iconSize: [40, 40], iconAnchor: [20, 20], className: '' }) }).addTo(map);
   if (ring) ring.setLatLng(ll);
   else ring = L.circle(ll, { color: '#a3e635', fillColor: '#a3e635', fillOpacity: .1, weight: 1, radius: 100 }).addTo(map);
+  syncPings();
 }
 async function requestWake() {
   try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
@@ -248,7 +387,7 @@ function testGone(p) {
   setTimeout(() => location.reload(), 2500);
 }
 socket.on('test_jeepney_deleted', testGone);
-socket.on('alert_cleared', d => { if (d.plate === plate) $('alert').style.display = 'none'; });
+socket.on('alert_cleared', d => { if (d.plate === plate) $('alert').style.display = 'none'; }); // the line stays until the passenger boards or cancels
 
 /* ---------- route ---------- */
 $('route').onchange = () => {
