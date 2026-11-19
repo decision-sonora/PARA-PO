@@ -99,7 +99,7 @@ select,input[type=password]{width:100%;padding:10px;border-radius:8px;background
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const routeLabel = r => (typeof r === 'string' && r) ? r : (r ? 'Custom' : 'Not set');
-const ROUTES = ['AYALA', 'SINNUNUC', 'UNASSIGNED'];
+let ROUTES = ['AYALA', 'SINNUNUC', 'UNASSIGNED'];   // replaced by the server's route list below
 
 const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 15);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -118,6 +118,21 @@ function log(msg) {
   $('log').prepend(d);
   while ($('log').children.length > 40) $('log').lastChild.remove();
 }
+
+/* ---------- route list (from the server) ---------- */
+async function loadRoutes() {
+  try {
+    const r = await fetch('/api/routes');
+    const j = await r.json();
+    if (!j.routes || !j.routes.length) return;
+    ROUTES = [...j.routes.map(x => x.id), 'UNASSIGNED'];
+    const cur = $('route').value;
+    $('route').innerHTML = ROUTES.map(id => `<option>${esc(id)}</option>`).join('');
+    $('route').value = ROUTES.includes(cur) ? cur : ROUTES[0];
+    renderJeeps();
+  } catch { /* keep the built-in list */ }
+}
+loadRoutes();
 
 /* ---------- auth ---------- */
 const tok = { get() { try { return sessionStorage.getItem('adminToken') || ''; } catch { return ''; } }, set(v) { try { sessionStorage.setItem('adminToken', v); } catch {} } };
@@ -153,6 +168,24 @@ function pointAt(pts, target) {
 }
 const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
 
+// Keep only the part of the fetched road that is still AHEAD of the vehicle, so the remaining distance
+// only shrinks as the jeepney approaches (instead of doubling back to where the road was fetched).
+function trimFrom(coords, p) {
+  if (coords.length < 2) return coords;
+  const mx = 111320 * Math.cos(p[0] * Math.PI / 180), my = 110540;
+  let best = Infinity, bi = 1, bp = coords[0];
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1], b = coords[i];
+    const ax = (a[1] - p[1]) * mx, ay = (a[0] - p[0]) * my;
+    const dx = (b[1] - p[1]) * mx - ax, dy = (b[0] - p[0]) * my - ay;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (d < best) { best = d; bi = i; bp = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+  }
+  return [bp, ...coords.slice(bi)];
+}
+
 // Draws jeepney -> passenger along the road (OSRM). Shows a dashed straight line until the road arrives
 // or if routing fails. The label stays live between route refreshes.
 class RoadLine {
@@ -162,7 +195,7 @@ class RoadLine {
     this.casing = L.polyline([], { ...base, color: '#0b0b0b', weight: 13, opacity: .9 });
     this.line = L.polyline([], { ...base, color, weight: 7, opacity: 1 });
     this.label = L.marker([0, 0], { interactive: false, keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'road-label-wrap', html: '', iconSize: [0, 0] }) });
-    this.road = null; this.shown = false; this.pending = false; this.fetchedAt = 0; this.fa = null; this.fb = null; this.token = 0;
+    this.road = null; this.shown = false; this.pending = false; this.fetchedAt = 0; this.fa = null; this.fb = null; this.token = 0; this.len = 0;
   }
   update(a, b) {            // a: jeepney [lat, lon], b: passenger [lat, lon]
     this.a = a; this.b = b;
@@ -188,8 +221,9 @@ class RoadLine {
   draw() {
     if (!this.shown) return;
     const hasRoad = !!this.road;
-    const pts = hasRoad ? [this.a, ...this.road.coords, this.b] : [this.a, this.b];
+    const pts = hasRoad ? [this.a, ...trimFrom(this.road.coords, this.a), this.b] : [this.a, this.b];
     const len = pathLen(pts);
+    this.len = len;
     const secs = hasRoad ? len * (this.road.duration / Math.max(this.road.distance, 1)) : len / 5.55; // fallback ~20 km/h
     this.casing.setLatLngs(pts);
     this.line.setLatLngs(pts);
@@ -199,7 +233,7 @@ class RoadLine {
     this.label.setLatLng(pointAt(pts, len / 2)).setIcon(L.divIcon({ className: 'road-label-wrap', iconSize: [0, 0], html: `<div class="road-label" style="background:${this.color}">${text}</div>` }));
   }
   clear() {
-    this.token++; this.pending = false; this.road = null; this.fetchedAt = 0; this.fa = this.fb = null;
+    this.token++; this.pending = false; this.road = null; this.fetchedAt = 0; this.fa = this.fb = null; this.len = 0;
     if (this.shown) { this.map.removeLayer(this.casing); this.map.removeLayer(this.line); this.map.removeLayer(this.label); }
     this.shown = false;
   }
@@ -296,10 +330,12 @@ function renderJeeps() {
   $('jeeps').innerHTML = plates.length ? plates.map(plate => {
     const s = status[plate] || { count: 0, max: 20, isFull: false, manualFull: false };
     const a = alerts[plate];
+    const cur = testJeeps[plate].route;
+    const routeOpts = (typeof cur === 'string' && cur && !ROUTES.includes(cur)) ? [cur, ...ROUTES] : ROUTES; // keep an unlisted route selectable
     return `<div class="item ${a ? 'alerting' : ''}" data-plate="${esc(plate)}">
       <div class="head"><b>🚐 ${esc(plate)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div>
       <div class="row">
-        <select data-act="route" aria-label="Route">${ROUTES.map(r => `<option ${testJeeps[plate].route === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+        <select data-act="route" aria-label="Route">${routeOpts.map(r => `<option ${cur === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
         <button class="btn sm" data-act="minus" aria-label="One fewer passenger">−</button>
         <button class="btn sm" data-act="plus" aria-label="One more passenger">+</button>
         <button class="btn sm ${s.manualFull ? 'warn' : ''}" data-act="full">${s.manualFull ? 'Reopen' : 'Mark full'}</button>
