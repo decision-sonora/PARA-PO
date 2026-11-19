@@ -52,8 +52,12 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .jeep-name{font-weight:700;color:var(--green);background:rgba(0,0,0,.8);padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap}
 .jeep-name.full{color:var(--red)}
 .jeep-emoji{font-size:30px;line-height:28px}
-.dist-tooltip{background:#1e1e1e!important;color:var(--green)!important;border:1px solid #333!important;border-radius:8px!important;font-weight:600!important;padding:6px 10px!important}
-.dist-tooltip::before{display:none}
+.road-label-wrap{background:none;border:none}
+.road-label{transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;color:#000;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px;border:2px solid #0b0b0b;box-shadow:0 4px 12px rgba(0,0,0,.55)}
+.board-pin{display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%);transition:opacity 6s ease-out,filter 6s ease-out}
+.board-pin .tag{background:#1e1e1e;color:#a3e635;border:1px solid #a3e635;border-radius:8px;font-size:11px;font-weight:700;padding:3px 8px;white-space:nowrap}
+.board-pin .pin{font-size:30px;line-height:30px;filter:drop-shadow(0 0 5px #a3e635)}
+.board-pin.decay{opacity:0;filter:grayscale(1) blur(3px)}
 #toasts{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:20000;display:flex;flex-direction:column;gap:8px;width:min(90vw,420px);pointer-events:none}
 .toast{background:#1e1e1e;border:1px solid #444;border-left:4px solid var(--green);padding:12px 14px;border-radius:8px;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .toast.err{border-left-color:var(--red)}
@@ -130,8 +134,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
 const socket = io();
 const jeeps = {}, status = {}, markers = {}, rings = {};
 let me = null, meMarker = null, manualMode = false;
-let pinged = null, pendingPing = null, pingLine = null;
-let boarded = null;
+let pinged = null, pendingPing = null, road = null;
+let boarded = null, boardSpot = null, boardedAt = null, boardFromMe = false;
 
 function toast(msg, err) {
   const d = document.createElement('div');
@@ -256,9 +260,22 @@ function checkNearby() {
 }
 
 /* ---------- my location ---------- */
+function personIcon() {
+  return L.divIcon({ html: '<div style="font-size:30px;filter:drop-shadow(0 0 5px #a3e635)">🧍</div>', iconSize: [30, 30], className: '' });
+}
+function boardIcon(t) {
+  const hm = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="board-pin"><div class="tag">Boarded here · ${hm}</div><div class="pin">📍</div></div>` });
+}
+function decayMarker(m) { // fade the boarding pin out after the ride, then remove it
+  const el = m.getElement() && m.getElement().querySelector('.board-pin');
+  if (el) el.classList.add('decay');
+  m.closePopup(); m.unbindPopup();
+  setTimeout(() => map.removeLayer(m), 6500);
+}
 function setMe(lat, lon, fly) {
   me = [lat, lon];
-  const icon = L.divIcon({ html: '<div style="font-size:30px;filter:drop-shadow(0 0 5px #a3e635)">🧍</div>', iconSize: [30, 30], className: '' });
+  const icon = personIcon();
   if (meMarker) meMarker.setLatLng(me); else meMarker = L.marker(me, { icon }).addTo(map).bindPopup('You are here');
   if (fly) map.setView(me, 16);
   renderList(); checkNearby();
@@ -288,6 +305,80 @@ $('search-row').onsubmit = async e => {
   } catch { toast('Search failed. Check your connection and try again.', true); }
 };
 
+/* ---------- road-following line with distance/time label ---------- */
+function hav(a, b) {
+  const R = 6371e3, r = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+function pathLen(pts) { let t = 0; for (let i = 1; i < pts.length; i++) t += hav(pts[i - 1], pts[i]); return t; }
+function pointAt(pts, target) {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const seg = hav(pts[i - 1], pts[i]);
+    if (seg > 0 && acc + seg >= target) {
+      const f = (target - acc) / seg;
+      return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f];
+    }
+    acc += seg;
+  }
+  return pts[pts.length - 1];
+}
+const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+
+// Draws jeepney -> passenger along the road (OSRM). Shows a dashed straight line until the road arrives
+// or if routing fails. The label stays live between route refreshes.
+class RoadLine {
+  constructor(map, color, tag) {
+    this.map = map; this.color = color; this.tag = tag || '';
+    const base = { lineCap: 'round', lineJoin: 'round', interactive: false };
+    this.casing = L.polyline([], { ...base, color: '#0b0b0b', weight: 13, opacity: .9 });
+    this.line = L.polyline([], { ...base, color, weight: 7, opacity: 1 });
+    this.label = L.marker([0, 0], { interactive: false, keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'road-label-wrap', html: '', iconSize: [0, 0] }) });
+    this.road = null; this.shown = false; this.pending = false; this.fetchedAt = 0; this.fa = null; this.fb = null; this.token = 0;
+  }
+  update(a, b) {            // a: jeepney [lat, lon], b: passenger [lat, lon]
+    this.a = a; this.b = b;
+    if (!this.shown) { this.casing.addTo(this.map); this.line.addTo(this.map); this.label.addTo(this.map); this.shown = true; }
+    const moved = !this.fa || hav(a, this.fa) > 15 || hav(b, this.fb) > 15;
+    if (!this.pending && Date.now() - this.fetchedAt > 4000 && (moved || !this.road)) this.fetchRoad();
+    this.draw();
+  }
+  async fetchRoad() {
+    const tok = this.token, a = this.a, b = this.b;
+    this.pending = true; this.fetchedAt = Date.now(); this.fa = a; this.fb = b;
+    try {
+      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`);
+      const j = await r.json();
+      if (tok === this.token && j.routes && j.routes[0]) {
+        const rt = j.routes[0];
+        this.road = { coords: rt.geometry.coordinates.map(c => [c[1], c[0]]), distance: rt.distance, duration: rt.duration };
+        this.draw();
+      }
+    } catch (e) { console.error('Routing error', e); }
+    if (tok === this.token) this.pending = false;
+  }
+  draw() {
+    if (!this.shown) return;
+    const hasRoad = !!this.road;
+    const pts = hasRoad ? [this.a, ...this.road.coords, this.b] : [this.a, this.b];
+    const len = pathLen(pts);
+    const secs = hasRoad ? len * (this.road.duration / Math.max(this.road.distance, 1)) : len / 5.55; // fallback ~20 km/h
+    this.casing.setLatLngs(pts);
+    this.line.setLatLngs(pts);
+    this.line.setStyle({ dashArray: hasRoad ? null : '12,12' });
+    const mins = Math.max(1, Math.ceil(secs / 60));
+    const text = `${esc(this.tag)}${hasRoad ? '' : '~'}${mins} min · ${fmtDist(len)}${hasRoad ? '' : ' (straight line)'}`;
+    this.label.setLatLng(pointAt(pts, len / 2)).setIcon(L.divIcon({ className: 'road-label-wrap', iconSize: [0, 0], html: `<div class="road-label" style="background:${this.color}">${text}</div>` }));
+  }
+  clear() {
+    this.token++; this.pending = false; this.road = null; this.fetchedAt = 0; this.fa = this.fb = null;
+    if (this.shown) { this.map.removeLayer(this.casing); this.map.removeLayer(this.line); this.map.removeLayer(this.label); }
+    this.shown = false;
+  }
+}
+
 /* ---------- ping ---------- */
 function pingDriver(plate) {
   if (!me) return toast('Set your location first: use GPS or pick a spot on the map.', true);
@@ -308,17 +399,14 @@ function cancelPing() {
 }
 function clearPing() {
   pinged = null; pendingPing = null;
-  if (pingLine) { map.removeLayer(pingLine); pingLine = null; }
+  if (road) { road.clear(); road = null; }
   renderList();
 }
 function updateLine() {
   const j = jeeps[pinged];
   if (!me || !j) return;
-  const to = [j.lat, j.lon];
-  if (!pingLine) pingLine = L.polyline([me, to], { color: '#a3e635', weight: 3, dashArray: '8,8' }).addTo(map);
-  else pingLine.setLatLngs([me, to]);
-  const d = map.distance(me, to);
-  pingLine.bindTooltip(`~${Math.max(1, Math.ceil(d / 333))} min (${Math.round(d)} m, straight line)`, { permanent: true, direction: 'center', className: 'dist-tooltip' }).openTooltip();
+  if (!road) road = new RoadLine(map, '#a3e635');
+  road.update([j.lat, j.lon], me);
 }
 socket.on('ping_acknowledged', ({ plate }) => toast(`✅ Driver of ${plate} saw your request.`));
 socket.on('ping_expired', ({ plate, reason }) => {
@@ -335,10 +423,17 @@ function boardJeep(plate) {
   enterRide(plate);
 }
 socket.on('board_rejected', ({ plate }) => {
-  if (plate === boarded) { leaveRide(); toast(`Jeepney ${plate} is full.`, true); }
+  if (plate === boarded) { leaveRide(true); toast(`Jeepney ${plate} is full.`, true); }
 });
 function enterRide(plate) {
-  boarded = plate; clearPing();
+  boarded = plate; boardedAt = new Date(); clearPing();
+  const jp = jeeps[plate];
+  boardFromMe = !!me;
+  boardSpot = me ? [...me] : (jp ? [jp.lat, jp.lon] : null);   // where you got on
+  if (boardSpot) {
+    if (!meMarker) meMarker = L.marker(boardSpot).addTo(map);
+    meMarker.setLatLng(boardSpot).setIcon(boardIcon(boardedAt)).unbindPopup().bindPopup('You boarded here');
+  }
   $('find').style.display = 'none'; $('list').style.display = 'none'; $('nearby').style.display = 'none';
   $('ride').style.display = 'flex';
   for (const p in markers) if (p !== plate) { map.removeLayer(markers[p]); map.removeLayer(rings[p]); delete markers[p]; delete rings[p]; }
@@ -347,19 +442,32 @@ function enterRide(plate) {
   updateRide();
 }
 function updateRide() {
-  const s = status[boarded]; if (!s) return;
+  const s = status[boarded] || { count: 0, max: 20 };
+  const j = jeeps[boarded];
   $('ride-plate').textContent = boarded;
-  $('ride-info').textContent = `Route: ${routeLabel(jeeps[boarded]?.route)} · ${s.count}/${s.max} seats taken`;
+  $('ride-info').textContent = `Route: ${routeLabel(j?.route)} · ${s.count}/${s.max} seats taken`
+    + (boardedAt ? ` · Boarded ${boardedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '')
+    + (boardSpot && j ? ` · ${fmtDist(hav(boardSpot, [j.lat, j.lon]))} from where you got on` : '');
 }
-function leaveRide() {
-  boarded = null;
+function leaveRide(neverRode) {
+  const j = jeeps[boarded];
+  boarded = null; boardSpot = null; boardedAt = null;
+  if (meMarker) {
+    if (neverRode && boardFromMe) meMarker.setIcon(personIcon()).unbindPopup().bindPopup('You are here');   // ride rejected: you are still waiting here
+    else if (neverRode) { map.removeLayer(meMarker); meMarker = null; }
+    else { decayMarker(meMarker); meMarker = null; me = null; }                                        // ride over: pin fades, location is stale
+  }
   $('ride').style.display = 'none'; $('find').style.display = 'block'; $('list').style.display = 'block';
   map.dragging.enable(); map.touchZoom.enable(); map.scrollWheelZoom.enable();
-  map.setView(me || DEFAULT_VIEW, me ? 16 : 14);
+  map.setView(me || (j ? [j.lat, j.lon] : DEFAULT_VIEW), (me || j) ? 16 : 14);
   for (const p in jeeps) upsertJeep(jeeps[p]);
   renderList(); checkNearby();
 }
-$('disembark').onclick = () => { if (boarded) socket.emit('passenger_disembark', { plate: boarded }); leaveRide(); };
+$('disembark').onclick = () => {
+  if (boarded) socket.emit('passenger_disembark', { plate: boarded });
+  leaveRide();
+  toast('Thanks for riding. Set your location to find your next jeepney.');
+};
 
 /* ---------- assistant ---------- */
 const history = [];
