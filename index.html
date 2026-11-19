@@ -51,6 +51,7 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .badge.open{background:rgba(163,230,53,.15);color:var(--green)}
 .badge.full{background:rgba(239,68,68,.2);color:var(--red)}
 .badge.way{background:rgba(56,189,248,.18);color:var(--blue)}
+.badge.custom{background:rgba(251,191,36,.15);color:var(--amber)}
 .card .btn{width:100%;margin-top:10px}
 .card .pair{display:flex;gap:8px}
 .empty{color:#888;font-size:14px;line-height:1.5}
@@ -180,6 +181,16 @@ socket.io.on('reconnect', () => {
 /* ---------- jeepney data ---------- */
 const goesThere = plate => !!plan && plan.routes.some(r => r.id === routeId(jeeps[plate]?.route));
 
+// Drivers can pick any listed route or type their own. The trip planner only understands listed routes.
+let catalog = null;   // Set of listed route ids, once loaded
+fetch('/api/routes').then(r => r.json()).then(j => { catalog = new Set((j.routes || []).map(x => x.id)); renderList(); }).catch(() => {});
+function routeKind(plate) {
+  const id = routeId(jeeps[plate]?.route);
+  if (!id || id === 'UNASSIGNED') return 'unset';
+  if (!catalog) return 'unknown';
+  return catalog.has(id) ? 'listed' : 'custom';
+}
+
 function iconFor(plate) {
   const full = status[plate]?.isFull;
   const dim = plan && !goesThere(plate);
@@ -261,6 +272,8 @@ function cardFor(plate) {
     <div class="card-top"><strong>${esc(plate)}</strong><span class="badge ${s.isFull ? 'full' : 'open'}">${s.isFull ? 'Full' : `${s.count}/${s.max} seats taken`}</span></div>
     <div class="meta">Route: ${esc(routeLabel(jeeps[plate].route))}${d !== null ? ` · ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'} ${how}` : ''}</div>
     ${way ? '<div style="margin-top:6px"><span class="badge way">🧭 Goes your way</span></div>' : ''}
+    ${!way && routeKind(plate) === 'custom' ? '<div style="margin-top:6px"><span class="badge custom" title="The driver typed their own route, so we cannot tell if it goes your way">Driver\'s own route · not in route list</span></div>' : ''}
+    ${!way && routeKind(plate) === 'unset' ? '<div style="margin-top:6px"><span class="badge custom">Route not set by driver</span></div>' : ''}
     ${isPinged ? '<div class="meta" style="color:var(--green)">Ping sent. Wait by the road and wave.</div>' : ''}
     ${actions}</div>`;
 }
@@ -498,6 +511,8 @@ function renderPlan() {
       if (plan.servesDestination && plan.servesDestination.length) html += `<div class="meta">Routes that pass near it: ${plan.servesDestination.map(r => esc(r.id)).join(', ')}. You may need to transfer.</div>`;
       if (plan.servesOrigin && plan.servesOrigin.length) html += `<div class="meta">Routes near you: ${plan.servesOrigin.map(r => esc(r.id)).join(', ')}.</div>`;
     }
+    const unknown = Object.keys(jeeps).filter(p => ['custom', 'unset'].includes(routeKind(p))).length;
+    if (unknown) html += `<div class="meta" style="color:var(--amber)">${unknown} online jeepney${unknown > 1 ? 's use' : ' uses'} their own or no route, so we can't tell if ${unknown > 1 ? 'they go' : 'it goes'} your way. Check the route shown on the card.</div>`;
     html += '<div class="note">Routes are a guide from the city route list. Confirm with the driver before you ride.</div></div>';
   }
   if (html !== planHtml) { planHtml = html; $('plan').innerHTML = html; }
