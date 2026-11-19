@@ -22,6 +22,8 @@ input:focus,select:focus{border-color:var(--green)}
 #plate{text-transform:uppercase}
 .go{background:var(--green);color:#000;border:none;padding:16px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer}
 #login-err{color:#fca5a5;font-size:14px;min-height:20px}
+.hint{font-size:12px;color:var(--dim);min-height:14px}
+.link{background:none;border:none;color:var(--green);cursor:pointer;font-size:13px;text-align:left;padding:0}
 #map-wrap{height:36vh;position:relative;flex-shrink:0}
 #map{height:100%;background:#1a1a1a;filter:brightness(.85) contrast(1.1)}
 #top{position:absolute;top:12px;left:12px;right:12px;z-index:1000;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
@@ -55,8 +57,11 @@ input:focus,select:focus{border-color:var(--green)}
   <form id="login-form">
     <h1>Start your shift</h1>
     <p>Passengers see your jeepney on the map once you start sharing your location.</p>
-    <label>Plate number<input id="plate" required maxlength="20" autocomplete="off" placeholder="e.g. ABC 123"></label>
     <label>Driver key<input id="key" type="password" autocomplete="off" placeholder="Leave blank if none was set"></label>
+    <label>Test jeepney (demo)<select id="test-select"><option value="">None, use my own plate</option></select></label>
+    <div class="hint" id="test-hint"></div>
+    <button type="button" class="link" id="refresh-tests">Refresh test jeepneys</button>
+    <label>Plate number<input id="plate" maxlength="20" autocomplete="off" placeholder="e.g. ABC 123"></label>
     <label>Route<select id="route-login"><option>UNASSIGNED</option><option>AYALA</option><option>SINNUNUC</option></select></label>
     <div id="login-err" role="alert"></div>
     <button class="go">Start sharing location</button>
@@ -105,7 +110,7 @@ const SEND_MS = 4000;
 let plate = null, key = '', route = 'UNASSIGNED';
 let watchId = null, sendTimer = null, lastPos = null, lastSent = 0, wakeLock = null;
 let st = { count: 0, max: 20, isFull: false, manualFull: false };
-let active = false;
+let active = false, testMode = false;
 
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -127,14 +132,15 @@ function register(cb) {
 }
 $('login-form').onsubmit = e => {
   e.preventDefault();
-  plate = $('plate').value.trim().toUpperCase();
+  testMode = !!$('test-select').value;
+  plate = (testMode ? $('test-select').value : $('plate').value).trim().toUpperCase();
   key = $('key').value;
   route = $('route-login').value;
-  if (!/^[A-Z0-9 -]{2,20}$/.test(plate) || plate.startsWith('TEST-')) { $('login-err').textContent = 'Enter a valid plate (letters, numbers, spaces or dashes; not TEST-).'; return; }
+  if (!/^[A-Z0-9 -]{2,20}$/.test(plate) || (!testMode && plate.startsWith('TEST-'))) { $('login-err').textContent = 'Enter a valid plate (letters, numbers, spaces or dashes; not TEST-).'; return; }
   if (!socket.connected) { $('login-err').textContent = 'Not connected to the server yet. Wait a moment and try again.'; return; }
   register(ok => {
-    if (!ok) { $('login-err').textContent = 'The driver key was not accepted.'; return; }
-    store.set('driverPlate', plate); store.set('driverRoute', route);
+    if (!ok) { $('login-err').textContent = testMode ? 'That test jeepney is gone, or the driver key was not accepted.' : 'The driver key was not accepted.'; return; }
+    if (!testMode) { store.set('driverPlate', plate); store.set('driverRoute', route); }
     startShift();
   });
 };
@@ -142,9 +148,9 @@ $('login-form').onsubmit = e => {
 function startShift() {
   active = true;
   $('login').style.display = 'none';
-  $('driver-id').textContent = plate;
-  $('route').value = route;
-  startGps();
+  $('driver-id').textContent = testMode ? `${plate} · test` : plate;
+  if (testMode) setGps('ok');      // the admin console moves test jeepneys, so no phone GPS
+  else { $('route').value = route; startGps(); }
   requestWake();
   say('Shift started.');
 }
@@ -159,7 +165,7 @@ $('end').onclick = () => {
 };
 
 // re-join the driver room after a dropped connection
-socket.on('connect', () => { if (active) register(ok => { if (!ok) showErr('Lost authorization after reconnecting. Reload and sign in again.'); }); });
+socket.on('connect', () => { loadTests(); if (active) register(ok => { if (!ok) showErr('Lost authorization after reconnecting. Reload and sign in again.'); }); });
 socket.on('disconnect', () => { if (active) showErr('Connection lost. Reconnecting…'); });
 socket.io.on('reconnect', () => showErr(''));
 
@@ -180,7 +186,7 @@ function onPos(p) {
   if (Date.now() - lastSent >= SEND_MS) send();
 }
 async function send() {
-  if (!lastPos || !active) return;
+  if (!lastPos || !active || testMode) return;
   lastSent = Date.now();
   try {
     const headers = { 'Content-Type': 'application/json' };
@@ -203,6 +209,46 @@ async function requestWake() {
   try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
 }
 document.addEventListener('visibilitychange', () => { if (active && document.visibilityState === 'visible') requestWake(); });
+
+/* ---------- test jeepney selection (demo mode) ---------- */
+function syncPlateField() {
+  const t = $('test-select').value;
+  $('plate').disabled = !!t;
+  $('plate').value = t || store.get('driverPlate');
+}
+function loadTests() {
+  if (!socket.connected) return;
+  socket.emit('driver_test_list', { key: $('key').value }, res => {
+    const sel = $('test-select'), cur = sel.value;
+    sel.innerHTML = '<option value="">None, use my own plate</option>';
+    if (res && res.ok) for (const j of res.jeepneys) {
+      const o = document.createElement('option');
+      o.value = j.plate; o.textContent = `${j.plate} (${(typeof j.route === 'string' && j.route) || 'no route'})`;
+      sel.appendChild(o);
+    }
+    sel.value = [...sel.options].some(o => o.value === cur) ? cur : '';
+    $('test-hint').textContent = !(res && res.ok) ? 'Enter the driver key to see test jeepneys.' : res.jeepneys.length ? '' : 'No test jeepneys yet. Place one from the admin console.';
+    syncPlateField();
+  });
+}
+$('test-select').onchange = syncPlateField;
+$('refresh-tests').onclick = loadTests;
+$('key').onchange = loadTests;
+
+// a test jeepney is moved from the admin console: follow it here
+socket.on('test_jeepney_update', d => {
+  if (!testMode || d.plate !== plate) return;
+  lastPos = { lat: d.lat, lon: d.lon };
+  if (typeof d.route === 'string' && [...$('route').options].some(o => o.value === d.route)) { $('route').value = d.route; route = d.route; }
+  drawMe();
+});
+function testGone(p) {
+  if (!testMode || p !== plate) return;
+  showErr('This test jeepney was removed. Returning to sign-in…');
+  setTimeout(() => location.reload(), 2500);
+}
+socket.on('test_jeepney_deleted', testGone);
+socket.on('alert_cleared', d => { if (d.plate === plate) $('alert').style.display = 'none'; });
 
 /* ---------- route ---------- */
 $('route').onchange = () => {
