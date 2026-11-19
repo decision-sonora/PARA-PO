@@ -33,6 +33,18 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 .loc-row{display:flex;gap:10px;margin-bottom:14px}
 .loc-row .btn{flex:1;font-size:12px}
 .btn.active{background:rgba(163,230,53,.2);border-color:var(--green);color:var(--green)}
+#explore-btn{width:100%;margin-bottom:12px;color:var(--amber);border-color:rgba(251,191,36,.45)}
+#explore{display:none;flex:1;min-height:0;overflow-y:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.chip{background:#2a2a2a;border:1px solid #444;border-radius:999px;padding:6px 11px;font-size:12px;cursor:pointer;color:#fff;font-weight:600;white-space:nowrap}
+.chip:hover{background:#333}
+.chip.on{background:rgba(251,191,36,.18);border-color:var(--amber);color:var(--amber)}
+.tips{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.5;color:#e8d9a8}
+.tips b{color:#fff}
+.place .pair{display:flex;gap:8px}
+.place .pair .btn{margin-top:10px}
+.place .tip{font-size:12px;color:#c9b97a;margin-top:6px;line-height:1.4}
+#chips{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#1a1a1a}
 #plan{max-height:34vh;overflow-y:auto}
 .plan{background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.35);border-radius:12px;padding:12px;margin-bottom:12px}
 .plan .meta{line-height:1.45}
@@ -114,8 +126,10 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
       <input id="dest-input" placeholder="Where are you going?" autocomplete="off">
       <button class="btn" id="dest-btn" aria-label="Find a route">🧭</button>
     </form>
+    <button class="btn" id="explore-btn">🌴 Explore Zamboanga (tourist guide)</button>
     <div id="plan" aria-live="polite"></div>
   </div>
+  <div id="explore"></div>
   <div id="nearby">🚨 A jeepney is within 100 m. Look outside!</div>
   <div id="list"></div>
   <div id="ride">
@@ -130,7 +144,14 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 <button id="chat-toggle" aria-label="Open assistant">💬</button>
 <div id="chat">
   <div id="chat-head"><span>🤖 PARA-PO assistant</span><button id="chat-close" aria-label="Close">✖</button></div>
-  <div id="chat-msgs"><div class="msg bot">Mabuhay! Ask me about fares, distances, landmarks or which route goes where. To see the route and live jeepneys for a trip, set your location and type your destination in "Where are you going?".</div></div>
+  <div id="chat-msgs"><div class="msg bot">Mabuhay! I know every barangay, school, mall and tourist spot in Zamboanga City. Ask me for places to visit, food to try, fares, or how to get somewhere. To see the route and live jeepneys for a trip, set your location and type your destination in "Where are you going?".</div></div>
+  <div id="chips">
+    <button class="chip" data-q="What are the top tourist spots in Zamboanga City?">🌴 Top spots</button>
+    <button class="chip" data-q="Which beaches or islands can I visit near Zamboanga City?">🏝️ Beaches</button>
+    <button class="chip" data-q="What local food should I try in Zamboanga and where?">🍤 Where to eat</button>
+    <button class="chip" data-q="Plan a one-day tourist itinerary in Zamboanga City using jeepneys.">🗓️ Plan my day</button>
+    <button class="chip" data-q="How much is the jeepney fare and who gets a discount?">💸 Fares</button>
+  </div>
   <form id="chat-form">
     <input id="chat-input" placeholder="Type a question" maxlength="500" autocomplete="off">
     <button class="btn solid" style="padding:0 16px">Send</button>
@@ -504,6 +525,7 @@ function renderPlan() {
         const n = online(r.id);
         return `<div class="rt"><div class="meta"><span class="dot" style="background:${PLAN_COLORS[i % PLAN_COLORS.length]}"></span><b style="color:#fff">${esc(r.id)}</b> · ${fmtDist(r.rideM)} ride toward ${esc(r.towards)}</div>
           <div class="meta">Walk ${fmtDist(r.walkToBoardM)} to the route, and ${fmtDist(r.walkFromAlightM)} from where you get off.</div>
+          ${r.fare ? `<div class="meta">Est. fare about ₱${r.fare.traditional} (traditional) or ₱${r.fare.modern} (modern). Students, seniors and PWD pay 20% less.</div>` : ''}
           <div class="meta" style="color:${n ? 'var(--blue)' : '#888'}">${n ? `${n} jeepney${n > 1 ? 's' : ''} online on this route` : 'No jeepney online on this route right now'}</div></div>`;
       }).join('');
     } else {
@@ -536,9 +558,8 @@ async function drawPlan() {
   }
 }
 
-$('dest-row').onsubmit = async e => {
-  e.preventDefault();
-  const q = $('dest-input').value.trim();
+$('dest-row').onsubmit = e => { e.preventDefault(); runPlan($('dest-input').value.trim()); };
+async function runPlan(q) {
   if (!q || boarded) return;
   if (!me) return toast('Set your location first (use GPS, pick on the map, or search where you are).', true);
   const btn = $('dest-btn'); btn.disabled = true;
@@ -556,7 +577,59 @@ $('dest-row').onsubmit = async e => {
     refreshAll();
   } catch { toast('Trip search failed. Check your connection and try again.', true); }
   finally { btn.disabled = false; }
-};
+}
+
+/* ---------- tourist guide ---------- */
+let places = null, exploreCats = [], exploreOpen = false, exploreCat = 'all';
+const TYPE_ICON = { tourist: '📍', food: '🍤', stay: '🛏️', mall: '🛍️' };
+async function loadPlaces() {
+  if (places) return;
+  try {
+    const r = await fetch('/api/places');
+    const j = await r.json();
+    places = j.places || []; exploreCats = j.categories || [];
+  } catch { toast('Could not load the tourist guide. Check your connection and try again.', true); }
+}
+function toggleExplore(open) {
+  exploreOpen = open === undefined ? !exploreOpen : open;
+  $('explore').style.display = exploreOpen ? 'block' : 'none';
+  $('list').style.display = exploreOpen ? 'none' : 'block';
+  $('plan').style.display = exploreOpen ? 'none' : 'block';
+  $('explore-btn').textContent = exploreOpen ? '← Back to jeepneys' : '🌴 Explore Zamboanga (tourist guide)';
+  if (exploreOpen) loadPlaces().then(renderExplore);
+}
+function renderExplore() {
+  if (!places) { $('explore').innerHTML = '<div class="empty">Loading…</div>'; return; }
+  const cat = exploreCats.find(c => c.id === exploreCat) || exploreCats[0] || { tags: [] };
+  const shown = places.filter(p => !cat.tags.length || p.tags.some(t => cat.tags.includes(t)));
+  $('explore').innerHTML = `
+    <div class="tips"><b>Riding a jeepney?</b> Say "Para po" to stop. Pass your fare forward to the driver and keep small bills and coins. Students, seniors and PWD pay 20% less. Emergency: 911.</div>
+    <div class="chips">${exploreCats.map(c => `<button class="chip ${c.id === exploreCat ? 'on' : ''}" data-ex="cat" data-id="${esc(c.id)}">${esc(c.label)}</button>`).join('')}</div>
+    <button class="btn solid" data-ex="day" style="width:100%;margin-bottom:12px">🗓️ Plan my day with the assistant</button>
+    ${shown.length ? shown.map(p => `<div class="card place">
+      <div class="card-top"><strong>${TYPE_ICON[p.type] || '📍'} ${esc(p.name)}</strong></div>
+      <div class="meta">${esc(p.blurb)}</div>
+      ${(p.tips || []).map(t => `<div class="tip">💡 ${esc(t)}</div>`).join('')}
+      <div class="pair">
+        <button class="btn green" data-ex="go" data-id="${esc(p.id)}">🧭 ${esc(p.goLabel || 'How do I get there?')}</button>
+        <button class="btn" data-ex="ask" data-id="${esc(p.id)}">💬 Ask</button>
+      </div></div>`).join('') : '<div class="empty">Nothing in this category yet.</div>'}
+    <div class="meta" style="font-size:11px">Details can change. Confirm boats, events and rates with the City Tourism Office or the operator.</div>`;
+}
+$('explore-btn').onclick = () => toggleExplore();
+$('explore').addEventListener('click', e => {
+  const b = e.target.closest('[data-ex]'); if (!b) return;
+  const act = b.dataset.ex, p = places && places.find(x => x.id === b.dataset.id);
+  if (act === 'cat') { exploreCat = b.dataset.id; renderExplore(); }
+  else if (act === 'day') askAI('Plan a one-day tourist itinerary in Zamboanga City using jeepneys.');
+  else if (act === 'ask' && p) askAI(`Tell me about ${p.name} and how to get there by jeepney.`);
+  else if (act === 'go' && p) {
+    if (!me) return toast('Set your location first (use GPS, pick on the map, or search where you are). Then tap this again.', true);
+    toggleExplore(false);
+    $('dest-input').value = p.q || p.name;
+    runPlan(p.q || p.name);
+  }
+});
 
 /* ---------- riding ---------- */
 function boardJeep(plate) {
@@ -570,6 +643,7 @@ socket.on('board_rejected', ({ plate }) => {
 });
 function enterRide(plate) {
   boarded = plate; boardedAt = new Date(); clearPing();
+  toggleExplore(false);
   removePlanLayers(); plan = null; planHtml = ''; $('plan').innerHTML = '';
   const jp = jeeps[plate];
   boardFromMe = !!me;
@@ -625,11 +699,12 @@ function addMsg(text, who) {
   return d;
 }
 let asking = false;
-$('chat-form').onsubmit = async e => {
-  e.preventDefault();
-  const text = $('chat-input').value.trim();
+$('chat-form').onsubmit = e => { e.preventDefault(); const t = $('chat-input').value.trim(); if (!t || asking) return; $('chat-input').value = ''; askAI(t); };
+$('chips').addEventListener('click', e => { const b = e.target.closest('button[data-q]'); if (b) askAI(b.dataset.q); });
+async function askAI(text) {
   if (!text || asking) return;
-  asking = true; $('chat-input').value = '';
+  asking = true;
+  chat.style.display = 'flex';   // open the assistant if a button elsewhere asked the question
   addMsg(text, 'user');
   const typing = addMsg('Typing…', 'bot');
   try {
@@ -640,7 +715,7 @@ $('chat-form').onsubmit = async e => {
     if (data.reply) history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
   } catch { typing.textContent = 'Network error. Please try again.'; }
   asking = false;
-};
+}
 
 renderList();
 </script>
