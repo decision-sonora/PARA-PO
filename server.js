@@ -15,7 +15,7 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';       // set to lock admin so
 const DRIVER_KEY = process.env.DRIVER_KEY || '';         // set to lock driver endpoints/events
 const ADMIN_PATH = process.env.ADMIN_PATH || '/admin-secret-2026';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-const TEST_PUBLIC = process.env.TEST_PUBLIC === 'true';  // show test jeepneys/passengers to commuters?
+let testPublic = process.env.TEST_PUBLIC === 'true';     // show test jeepneys to commuters? (admins can flip this live for demos)
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 const ADMIN_OPEN = !ADMIN_TOKEN;
@@ -227,10 +227,12 @@ app.use(express.static(STATIC_DIR, { dotfiles: 'deny', index: false }));
 // ==================== REAL-TIME STATE ====================
 let activeJeepneys = {};   // plate -> { plate, lat, lon, route, lastSeen, ... }
 let testJeepneys = {};
-let testPassengers = {};
+let testPassengers = {};   // id -> { id, lat, lon, boarded: plate|null, pingPlate: plate|null }
 let jeepneyStatus = {};    // plate -> { count, max, isFull, manualFull }
-let activePings = {};      // plate -> Map(socketId -> { passLat, passLon, at })
+let activePings = {};      // plate -> Map(key -> { passLat, passLon, at, testId? }); key = socketId, or "test:<id>" for test passengers
 let testSeq = 0;
+
+const isTestPlate = (plate) => String(plate).startsWith('TEST-');
 
 function ensureStatus(plate) {
     if (!jeepneyStatus[plate]) jeepneyStatus[plate] = { count: 0, max: MAX_CAPACITY, isFull: false, manualFull: false };
@@ -240,15 +242,81 @@ function recomputeFull(s) { s.isFull = s.manualFull || s.count >= s.max; }
 function broadcastStatus(plate) { io.emit('status_update', { plate, status: jeepneyStatus[plate] }); }
 
 function emitTest(event, payload) {
-    if (TEST_PUBLIC) io.emit(event, payload);
+    if (testPublic) io.emit(event, payload);
     else io.to('admin').emit(event, payload);
 }
 
 function getAnyJeepney(plate, socket) {
     if (activeJeepneys[plate]) return activeJeepneys[plate];
     const t = testJeepneys[plate];
-    if (t && (TEST_PUBLIC || socket?.data?.isAdmin)) return t;
+    if (t && (testPublic || socket?.data?.isAdmin)) return t;
     return null;
+}
+
+// ---- test passenger helpers (used by the admin demo console) ----
+function pushTestPassenger(p) { emitTest('test_passenger_update', p); }
+
+function emitPingCancelled(plate, remaining) {
+    io.to(`driver:${plate}`).emit('ping_cancelled', { plate, remaining });
+    if (isTestPlate(plate)) io.to('admin').emit('ping_cancelled', { plate, remaining }); // test jeepneys are "driven" from the admin console
+}
+
+function dropPing(plate, key) {
+    const m = activePings[plate];
+    if (!m) return 0;
+    m.delete(key);
+    if (m.size === 0) delete activePings[plate];
+    return m.size;
+}
+
+function cancelTestPing(id) {
+    const p = testPassengers[id];
+    if (!p || !p.pingPlate) return;
+    const plate = p.pingPlate;
+    p.pingPlate = null;
+    const remaining = dropPing(plate, `test:${id}`);
+    emitPingCancelled(plate, remaining);
+    pushTestPassenger(p);
+}
+
+function releaseTestSeat(id) {
+    const p = testPassengers[id];
+    if (!p || !p.boarded) return;
+    const plate = p.boarded;
+    p.boarded = null;
+    const s = jeepneyStatus[plate];
+    if (s) {
+        if (s.count > 0) s.count -= 1;
+        recomputeFull(s);
+        broadcastStatus(plate);
+    }
+    pushTestPassenger(p);
+}
+
+function detachFromJeepney(plate) { // jeepney vanished: free any test passengers tied to it
+    for (const p of Object.values(testPassengers)) {
+        let changed = false;
+        if (p.boarded === plate) { p.boarded = null; changed = true; }
+        if (p.pingPlate === plate) { p.pingPlate = null; changed = true; }
+        if (changed) pushTestPassenger(p);
+    }
+}
+
+function carryPassengers(plate, lat, lon) { // riders move with their jeepney
+    for (const p of Object.values(testPassengers)) {
+        if (p.boarded === plate) { p.lat = lat; p.lon = lon; pushTestPassenger(p); }
+    }
+}
+
+// tell whoever made a ping that it ended (real passenger socket, or the admin console for test passengers)
+function notifyPingEnd(plate, key, p, reason) {
+    if (p && p.testId) {
+        const tp = testPassengers[p.testId];
+        if (tp && tp.pingPlate === plate) { tp.pingPlate = null; pushTestPassenger(tp); }
+        io.to('admin').emit('test_ping_expired', { plate, id: p.testId, reason });
+    } else {
+        io.to(key).emit('ping_expired', { plate, reason });
+    }
 }
 
 // ==================== HTTP: DRIVER GPS UPDATES ====================
@@ -263,7 +331,7 @@ app.post('/api/update', (req, res) => {
     const lat = Number(d.lat);
     const lon = Number(d.lon);
 
-    if (!plate || plate.startsWith('TEST-')) return res.status(400).send('Invalid plate');
+    if (!plate || isTestPlate(plate)) return res.status(400).send('Invalid plate');
     if (!validCoords(lat, lon)) return res.status(400).send('Invalid coordinates');
     if (!updateLimiter(plate)) return res.status(429).send('Too many updates');
 
@@ -275,6 +343,7 @@ app.post('/api/update', (req, res) => {
     ensureStatus(plate);
 
     io.emit('jeepney_update', activeJeepneys[plate]);
+    carryPassengers(plate, lat, lon);
     if (isNew) broadcastStatus(plate);
     res.status(200).send('OK');
 });
@@ -285,6 +354,7 @@ function promoteAdmin(socket) {
     socket.join('admin');
     socket.emit('initial_test_jeepneys', testJeepneys);
     socket.emit('initial_test_passengers', testPassengers);
+    socket.emit('test_public_state', testPublic);
 }
 
 function canDrive(socket, plate) {
@@ -294,6 +364,7 @@ function canDrive(socket, plate) {
 }
 
 function alertDriver(plate, payload) {
+    if (isTestPlate(plate)) { io.to('admin').emit('driver_alert', payload); return true; } // demo: admin console plays the driver
     const room = `driver:${plate}`;
     const hasDriver = (io.sockets.adapter.rooms.get(room)?.size || 0) > 0;
     if (hasDriver) { io.to(room).emit('driver_alert', payload); return true; }
@@ -312,14 +383,6 @@ function releaseSeat(socket) {
     broadcastStatus(plate);
 }
 
-function dropPing(plate, socketId) {
-    const m = activePings[plate];
-    if (!m) return 0;
-    m.delete(socketId);
-    if (m.size === 0) delete activePings[plate];
-    return m.size;
-}
-
 io.on('connection', (socket) => {
     const auth = socket.handshake.auth || {};
     socket.data.isAdmin = false;
@@ -331,7 +394,7 @@ io.on('connection', (socket) => {
     socket.emit('initial_status', jeepneyStatus);
 
     if (ADMIN_OPEN || safeEqual(auth.adminToken, ADMIN_TOKEN)) promoteAdmin(socket);
-    else if (TEST_PUBLIC) { socket.emit('initial_test_jeepneys', testJeepneys); socket.emit('initial_test_passengers', testPassengers); }
+    else if (testPublic) { socket.emit('initial_test_jeepneys', testJeepneys); socket.emit('initial_test_passengers', testPassengers); }
 
     const on = (event, handler) => socket.on(event, (...args) => {
         try { handler(...args); } catch (e) { console.error(`[socket:${event}]`, e); }
@@ -403,7 +466,15 @@ io.on('connection', (socket) => {
         if (!plate || !canDrive(socket, plate)) return;
         const pings = activePings[plate];
         if (!pings) return;
-        for (const socketId of pings.keys()) io.to(socketId).emit('ping_acknowledged', { plate });
+        for (const [key, p] of pings) {
+            if (p.testId) {
+                const tp = testPassengers[p.testId];
+                if (tp && tp.pingPlate === plate) { tp.pingPlate = null; pushTestPassenger(tp); }
+                io.to('admin').emit('test_ping_acknowledged', { plate, id: p.testId });
+            } else {
+                io.to(key).emit('ping_acknowledged', { plate });
+            }
+        }
         delete activePings[plate];
     });
 
@@ -467,7 +538,7 @@ io.on('connection', (socket) => {
         const plate = normalizePlate(data.plate);
         if (!plate || !activePings[plate]?.has(socket.id)) return;
         const remaining = dropPing(plate, socket.id);
-        io.to(`driver:${plate}`).emit('ping_cancelled', { plate, remaining });
+        emitPingCancelled(plate, remaining);
     });
 
     // ---- admin events ----
@@ -492,11 +563,13 @@ io.on('connection', (socket) => {
         testJeepneys[plate].lat = lat;
         testJeepneys[plate].lon = lon;
         emitTest('test_jeepney_update', testJeepneys[plate]);
+        carryPassengers(plate, lat, lon);
     });
 
     adminOnly('admin_delete_test_jeepney', (plate) => {
         plate = String(plate || '');
         if (!testJeepneys[plate]) return;
+        detachFromJeepney(plate);
         delete testJeepneys[plate];
         delete jeepneyStatus[plate];
         delete activePings[plate];
@@ -508,18 +581,102 @@ io.on('connection', (socket) => {
         const lat = Number(data.lat), lon = Number(data.lon);
         if (!validCoords(lat, lon)) return;
         const id = `PASS-${++testSeq}`;
-        testPassengers[id] = { id, lat, lon };
-        emitTest('test_passenger_update', testPassengers[id]);
+        testPassengers[id] = { id, lat, lon, boarded: null, pingPlate: null };
+        pushTestPassenger(testPassengers[id]);
+    });
+
+    adminOnly('admin_move_test_passenger', (data) => {
+        data = data || {};
+        const id = String(data.id || '');
+        const lat = Number(data.lat), lon = Number(data.lon);
+        const p = testPassengers[id];
+        if (!p || p.boarded || !validCoords(lat, lon)) return;
+        p.lat = lat; p.lon = lon;
+        pushTestPassenger(p);
     });
 
     adminOnly('admin_delete_test_passenger', (id) => {
         id = String(id || '');
         if (!testPassengers[id]) return;
+        cancelTestPing(id);
+        releaseTestSeat(id);
         delete testPassengers[id];
         emitTest('test_passenger_deleted', id);
     });
 
+    // test passenger pings a jeepney, exactly like a real commuter would
+    adminOnly('admin_test_ping', (data) => {
+        data = data || {};
+        const id = String(data.id || '');
+        const plate = normalizePlate(data.plate);
+        const p = testPassengers[id];
+        if (!p) return;
+        const reply = (extra) => socket.emit('test_ping_result', { id, plate, ...extra });
+
+        if (p.boarded) return reply({ error: `${id} is already riding ${p.boarded}.` });
+        const jeep = getAnyJeepney(plate, socket);
+        if (!jeep) return reply({ error: 'Jeepney no longer active.' });
+        if (jeepneyStatus[plate]?.isFull) return reply({ error: 'This jeepney is already full.' });
+
+        const dist = getDistance(jeep.lat, jeep.lon, p.lat, p.lon);
+        if (dist > MAX_PING_DISTANCE_M) return reply({ error: `This jeepney is still ${Math.round(dist)} m away. Move one closer.` });
+
+        cancelTestPing(id); // one active ping per passenger
+        if (!activePings[plate]) activePings[plate] = new Map();
+        activePings[plate].set(`test:${id}`, { passLat: p.lat, passLon: p.lon, at: Date.now(), testId: id });
+        p.pingPlate = plate;
+        pushTestPassenger(p);
+        const waiting = activePings[plate].size;
+
+        const reachable = alertDriver(plate, {
+            plate,
+            count: waiting,
+            message: `Passenger waiting ${Math.round(dist)} meters away!` + (waiting > 1 ? ` (${waiting} passengers waiting)` : '')
+        });
+        io.to('admin').emit('admin_route_to_passenger', { plate, passLat: p.lat, passLon: p.lon, passengerId: id });
+        reply({ ok: true, distance: dist, driverOnline: reachable });
+    });
+
+    adminOnly('admin_test_cancel_ping', (data) => { cancelTestPing(String((data || {}).id || '')); });
+
+    adminOnly('admin_test_board', (data) => {
+        data = data || {};
+        const id = String(data.id || '');
+        const plate = normalizePlate(data.plate);
+        const p = testPassengers[id];
+        if (!p) return;
+        const reply = (extra) => socket.emit('test_ping_result', { id, plate, ...extra });
+        if (!getAnyJeepney(plate, socket)) return reply({ error: 'Jeepney no longer active.' });
+        if (p.boarded === plate) return;
+        const s = ensureStatus(plate);
+        if (s.count >= s.max) return reply({ error: `${plate} is full.` });
+        releaseTestSeat(id);   // moving between jeepneys
+        cancelTestPing(id);
+        s.count += 1;
+        p.boarded = plate;
+        recomputeFull(s);
+        broadcastStatus(plate);
+        const j = getAnyJeepney(plate, socket);
+        p.lat = j.lat; p.lon = j.lon;
+        pushTestPassenger(p);
+    });
+
+    adminOnly('admin_test_disembark', (data) => { releaseTestSeat(String((data || {}).id || '')); });
+
+    // flip whether commuters can see test jeepneys (turn on for a live demo, off afterwards)
+    adminOnly('admin_set_public_test', (value) => {
+        testPublic = Boolean(value);
+        io.to('admin').emit('test_public_state', testPublic);
+        if (testPublic) {
+            io.except('admin').emit('initial_test_jeepneys', testJeepneys);
+            io.except('admin').emit('initial_test_passengers', testPassengers);
+        } else {
+            io.except('admin').emit('clear_all_test_objects');
+        }
+    });
+
     adminOnly('admin_clear_all', () => {
+        for (const id of Object.keys(testPassengers)) { cancelTestPing(id); releaseTestSeat(id); }
         for (const plate of Object.keys(testJeepneys)) { delete jeepneyStatus[plate]; delete activePings[plate]; }
         testJeepneys = {};
         testPassengers = {};
@@ -533,7 +690,7 @@ io.on('connection', (socket) => {
             for (const plate of Object.keys(activePings)) {
                 if (activePings[plate].has(socket.id)) {
                     const remaining = dropPing(plate, socket.id);
-                    io.to(`driver:${plate}`).emit('ping_cancelled', { plate, remaining });
+                    emitPingCancelled(plate, remaining);
                 }
             }
         } catch (e) { console.error('[disconnect]', e); }
@@ -549,7 +706,8 @@ const sweeper = setInterval(() => {
         if (now - (activeJeepneys[plate].lastSeen || 0) > STALE_JEEPNEY_MS) {
             delete activeJeepneys[plate];
             delete jeepneyStatus[plate];
-            for (const socketId of (activePings[plate]?.keys() || [])) io.to(socketId).emit('ping_expired', { plate, reason: 'offline' });
+            detachFromJeepney(plate);
+            for (const [key, p] of (activePings[plate] || [])) notifyPingEnd(plate, key, p, 'offline');
             delete activePings[plate];
             io.emit('jeepney_removed', plate);
         }
@@ -557,10 +715,10 @@ const sweeper = setInterval(() => {
 
     // pings nobody answered
     for (const plate of Object.keys(activePings)) {
-        for (const [socketId, p] of activePings[plate]) {
+        for (const [key, p] of activePings[plate]) {
             if (now - p.at > PING_TTL_MS) {
-                io.to(socketId).emit('ping_expired', { plate, reason: 'timeout' });
-                activePings[plate].delete(socketId);
+                notifyPingEnd(plate, key, p, 'timeout');
+                activePings[plate].delete(key);
             }
         }
         if (activePings[plate].size === 0) delete activePings[plate];
