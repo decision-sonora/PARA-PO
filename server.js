@@ -9,6 +9,15 @@ const fs = require('fs');
 const crypto = require('crypto');
 const OpenAI = require('openai');
 
+// Places data for the assistant and the tourist guide (barangays, schools, malls, landmarks, spots).
+// If knowledge.js is missing the server still runs, it just knows fewer places.
+let KB;
+try { KB = require('./knowledge'); }
+catch (e) {
+    console.warn('[WARN] knowledge.js not found or broken: the assistant will have no places data.', e.message);
+    KB = { buildHint: () => '', promptIndex: () => '', listPlaces: () => [], CATEGORIES: [] };
+}
+
 // ==================== CONFIG ====================
 const PORT = process.env.PORT || 8080;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';       // set to lock admin socket events
@@ -235,6 +244,17 @@ const MIN_RIDE_M = 300;           // origin and destination must be at least thi
 
 const planLimiter = makeLimiter(20, 60 * 1000);
 
+// Rough fare for a trip along a route. The route line is straighter than the real road, so pad it a little.
+function estimateFare(alongM) {
+    const km = (alongM / 1000) * 1.25;
+    return { approxKm: Number(km.toFixed(1)), traditional: computeFare(km, false), modern: computeFare(km, true) };
+}
+
+// the tourist guide on the passenger page
+app.get('/api/places', (req, res) => {
+    res.json({ categories: KB.CATEGORIES, places: KB.listPlaces() });
+});
+
 app.get('/api/routes', (req, res) => {
     res.json({ ready: routesReady, allowCustom: true, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
 });
@@ -261,6 +281,7 @@ app.post('/api/plan', (req, res) => {
                 walkToBoardM: Math.round(o.dist),
                 walkFromAlightM: Math.round(d.dist),
                 rideM: Math.round(Math.abs(o.along - d.along)),
+                fare: estimateFare(Math.abs(o.along - d.along)),
                 towards: d.along > o.along ? rp.names[rp.names.length - 1] : ROUTE_ANCHOR,
                 path: rp.path
             });
@@ -320,6 +341,7 @@ function buildVerifiedHint(message) {
         : '';
     const routeLines = buildRouteHint(text);
     if (routeLines.length) out += '\n\nSERVER-VERIFIED ROUTE MATCHES FOR THIS QUESTION:\n' + routeLines.join('\n');
+    out += KB.buildHint(message);
     return out;
 }
 
@@ -344,23 +366,21 @@ const SYSTEM_PROMPT = `You are PARA-PO Bot, a helpful assistant for jeepney comm
 RULES:
 1. DO NOT use markdown formatting (no asterisks, no hashtags, no bold). Use plain text only.
 2. Reply in the same language the commuter uses (English, Tagalog, Chavacano, Cebuano, etc.).
-3. If asked about a location, use the database below.
+3. If asked about a place, barangay, school, mall, hospital or tourist spot, use the PLACE DATABASE below and any SERVER-VERIFIED PLACE DATA. All 98 barangays are listed, so never say a barangay does not exist. Recognise common spellings and short names (Sta. or Santa, Sinunuc or Sinunoc or Sinnunuc, WMSU, ADZU, ZCHS, RSHS IX). If a place is not in the database, say you do not have it on file and suggest typing it into the "Where are you going?" box on the PARA-PO map.
 4. For distances, use ONLY the verified matrix or the SERVER-VERIFIED FIGURES section if present. If a distance is not listed, say you do not have a verified distance for it and suggest checking the route on the PARA-PO map. Never guess a number.
 5. For fares, use ONLY figures given in SERVER-VERIFIED FIGURES. If none are given, explain the fare rules and ask for the distance. Never calculate fares yourself.
 6. You have a ROUTE CATALOG below (route names and the places they serve). You do NOT have schedules, exact roads, or which jeepneys are online. When asked which jeepney to ride, name routes only from the catalog or the SERVER-VERIFIED ROUTE MATCHES section, say the catalog is a guide, and tell the commuter to type the destination in the "Where are you going?" box on the PARA-PO map to see the route and the jeepneys on it live. If the place is not in the catalog, say so and point to that box.
-7. Students, senior citizens and persons with disabilities are entitled to a 20 percent fare discount on public transport. Mention it when relevant.
+7. Students, senior citizens and persons with disabilities are entitled to a 20 percent fare discount on public transport. Mention it when relevant. Do not claim any discount for tourists.
+8. TOURIST HELP: when someone asks for ideas, things to do, where to eat, where to stay, or what to see, recommend only places from the PLACE DATABASE or the SERVER-VERIFIED PLACE DATA. Give 3 to 5 picks, one short line each saying why it is worth it, matched to what they asked (beach, food, family, budget, sunset, culture). For a day plan, build it from the ITINERARY BUILDING BLOCKS in a sensible order and keep it to 3 or 4 stops.
+9. Never invent opening hours, entrance fees, boat prices, phone numbers, street addresses or event dates beyond what the database says. When these matter, tell the visitor to confirm with the City Tourism Office or the operator. Island trips, boats and weather always need confirming.
+10. After recommending, say how to get there: type the place in the "Where are you going?" box on the PARA-PO map to see the route, jeepneys on it and an estimated fare, or open the Explore guide (the palm tree button). Do not claim a specific jeepney route goes to a tourist spot unless it appears in SERVER-VERIFIED ROUTE MATCHES.
+11. Helpful jeepney tips for visitors: say "Para po" to ask the driver to stop, pass the fare forward to the driver, keep small bills and coins, and for emergencies call 911. Be warm and welcoming, and keep the whole reply short enough to read on a phone. Use plain dashes for lists, no other formatting.
 
 ROUTE CATALOG (route name: places served, starting from downtown):
 ${ROUTE_CATALOG.map(r => `- ${r.id}: ${r.stops.join(', ')}`).join('\n')}
 
-ZAMBOANGA CITY LANDMARK DATABASE:
-Malls: KCC Mall de Zamboanga, SM City Mindpro, City Mall Tetuan, Southway Square, Canelar Barter Trade.
-Tourist Spots: Fort Pilar, Pasonanca Park, Paseo del Mar, R.T. Lim Boulevard, Cawa-Cawa Boulevard, Sta. Cruz Island, Taluksangay Mosque, Plaza Pershing, Metropolitan Cathedral.
-Schools: Western Mindanao State University (WMSU), Ateneo de Zamboanga University (ADZU), Universidad de Zamboanga (UZ), Zamboanga State College of Marine Sciences and Technology (ZSCMST), Don Pablo Lorenzo Memorial High School.
-Hospitals: Zamboanga City Medical Center (ZCMC), Brent Hospital, Mindanao Central Sanitarium, Zamboanga Doctors Hospital.
-Transport: Zamboanga International Airport, Integrated Bus Terminal (Canelar).
-Roads: Governor Camins Avenue, Maria Clara Lobregat Highway, Veterans Avenue, La Purisima Street, Nu\u00f1ez Extension, Airport Road.
-Barangays: Ayala, San Jose Gusu, Sinnunuc, Tetuan, Canelar, Guiwan, Tumaga, Putik, Divisoria, Sta. Maria, Sta. Barbara, Baliwasan, San Roque, Calarian, Cawit, Recodo, Talisayan, Pasonanca, Mercedes, Sta. Catalina, San Jose Cawa-Cawa.
+PLACE DATABASE (Zamboanga City):
+${KB.promptIndex()}
 
 VERIFIED DRIVING DISTANCE MATRIX (From KCC Mall):
 ${DISTANCES_FROM_KCC.map(d => `- ${d.label} to KCC Mall: ${d.km.toFixed(1)} km`).join('\n')}
@@ -390,7 +410,7 @@ app.post('/api/ask-ai', async (req, res) => {
         const completion = await groq.chat.completions.create({
             model: GROQ_MODEL,
             temperature: 0.3,
-            max_tokens: 600,
+            max_tokens: 900,
             messages: [
                 { role: 'system', content: SYSTEM_PROMPT },
                 ...cleanHistory(req.body.history),
