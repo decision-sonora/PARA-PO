@@ -75,7 +75,10 @@ function validCoords(lat, lon) {
 
 function cleanRoute(r) {
     if (r === undefined || r === null) return null;
-    if (typeof r === 'string') return r.trim().slice(0, 100);
+    if (typeof r === 'string') { // routes are compared case-insensitively, so store one tidy upper-case form
+        const s = r.replace(/[^A-Za-z0-9 .,'&()\/-]/g, '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 40);
+        return s || null;
+    }
     try { return JSON.stringify(r).length <= 2000 ? r : null; } catch { return null; }
 }
 
@@ -95,9 +98,25 @@ function getDistance(lat1, lon1, lat2, lon2) { // Haversine, meters (straight-li
 // ROUTE_ANCHOR (downtown) out through its stops, ordered by distance from the anchor.
 // Keep ids short and unique; drivers pick them from a dropdown. 'UNASSIGNED' is added by the pages.
 const ROUTE_ANCHOR = 'Plaza Pershing';
+// Drivers (real and test) can also type their own route name when theirs is not listed. Those custom
+// routes show up on the map and in the passenger list, but the trip planner can only match routes
+// that are listed here, so add a route here once it is confirmed.
 const ROUTE_CATALOG = [
+    // west / north-west
     { id: 'AYALA', stops: ['Ayala'] },
     { id: 'SINNUNUC', stops: ['Sinunuc'] },
+    { id: 'LABUAN', stops: ['Labuan'] },
+    { id: 'LIMPAPA', stops: ['Limpapa'] },
+    { id: 'LICOMO', stops: ['Licomo'] },
+    { id: 'CURUAN', stops: ['Curuan'] },
+    { id: 'LAPAKAN', stops: ['Lapakan'] },
+    { id: 'TALISAYAN', stops: ['Talisayan'] },
+    { id: 'RECODO', stops: ['Recodo'] },
+    { id: 'CAWIT', stops: ['Cawit'] },
+    { id: 'BOALAN', stops: ['Boalan'] },
+    { id: 'CULIANAN', stops: ['Culianan'] },
+    { id: 'TICTAPUL', stops: ['Tictapul'] },
+    // city and near-city
     { id: 'CANELAR', stops: ['Canelar'] },
     { id: 'GUIWAN', stops: ['Guiwan'] },
     { id: 'TUMAGA', stops: ['Tumaga'] },
@@ -105,14 +124,37 @@ const ROUTE_CATALOG = [
     { id: 'PASONANCA', stops: ['Pasonanca'] },
     { id: 'PUTIK', stops: ['Putik'] },
     { id: 'STA MARIA', stops: ['Santa Maria'] },
+    { id: 'STA BARBARA', stops: ['Santa Barbara'] },
+    { id: 'STA CATALINA', stops: ['Santa Catalina'] },
     { id: 'SAN ROQUE', stops: ['San Roque'] },
+    { id: 'SAN JOSE GUSU', stops: ['San Jose Gusu'] },
     { id: 'CALARIAN', stops: ['Calarian'] },
     { id: 'TETUAN', stops: ['Tetuan', 'KCC Mall de Zamboanga'] },
+    { id: 'DIVISORIA', stops: ['Divisoria'] },
     { id: 'MERCEDES', stops: ['Mercedes'] },
-    { id: 'TALISAYAN', stops: ['Talisayan'] },
-    { id: 'RECODO', stops: ['Recodo'] },
-    { id: 'CAWIT', stops: ['Cawit'] },
-    { id: 'AIRPORT', stops: ['Zamboanga International Airport'] }
+    { id: 'LUNZURAN', stops: ['Lunzuran'] },
+    { id: 'MAASIN', stops: ['Maasin'] },
+    { id: 'MAMPANG', stops: ['Mampang'] },
+    { id: 'CABATANGAN', stops: ['Cabatangan'] },
+    { id: 'BUNGUIAO', stops: ['Bunguiao'] },
+    { id: 'LUBIGAN', stops: ['Lubigan'] },
+    { id: 'ZONE IV', stops: ['Zone IV'] },
+    { id: 'CAMINO NUEVO', stops: ['Camino Nuevo'] },
+    // east / south-east
+    { id: 'TALUKSANGAY', stops: ['Taluksangay'] },
+    { id: 'LAMISAHAN', stops: ['Lamisahan'] },
+    { id: 'MANICAHAN', stops: ['Manicahan'] },
+    { id: 'VITALI', stops: ['Vitali'] },
+    { id: 'SIBULAO', stops: ['Sibulao'] },
+    { id: 'RIO HONDO', stops: ['Rio Hondo'] },
+    { id: 'SANGALI', stops: ['Sangali'] },
+    // landmarks
+    { id: 'AIRPORT', stops: ['Zamboanga International Airport'] },
+    { id: 'ZCMC', stops: ['Zamboanga City Medical Center'] },
+    { id: 'ATENEO', stops: ['Ateneo de Zamboanga University'] },
+    { id: 'SOUTHWAY', stops: ['Southway Square'] },
+    { id: 'MINDPRO', stops: ['SM City Mindpro'] },
+    { id: 'BUS TERMINAL', stops: ['Zamboanga Integrated Bus Terminal'] }
 ];
 
 const GEO_CACHE_FILE = path.join(__dirname, '.geocache.json');
@@ -194,7 +236,7 @@ const MIN_RIDE_M = 300;           // origin and destination must be at least thi
 const planLimiter = makeLimiter(20, 60 * 1000);
 
 app.get('/api/routes', (req, res) => {
-    res.json({ ready: routesReady, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
+    res.json({ ready: routesReady, allowCustom: true, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
 });
 
 app.post('/api/plan', (req, res) => {
