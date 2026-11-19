@@ -132,22 +132,39 @@ function say(text) {
 function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
 
 /* ---------- route list (from the server) ---------- */
+const OTHER = '__other__';
+let routeIds = ['UNASSIGNED', 'AYALA', 'SINNUNUC'];   // replaced by the server's list
+const cleanRouteName = s => String(s || '').replace(/[^A-Za-z0-9 .,'&()\/-]/g, '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 40);
+// rebuild a route dropdown: the server's routes, any custom route currently in use, then "type your own"
+function fillRoute(sel, want) {
+  const value = want || sel.value;
+  const ids = routeIds.includes(value) || !value || value === OTHER ? routeIds : [...routeIds, value];
+  sel.innerHTML = ids.map(id => `<option>${esc(id)}</option>`).join('') + `<option value="${OTHER}">Other (type your own)…</option>`;
+  sel.value = ids.includes(value) ? value : 'UNASSIGNED';
+}
+// when "Other" is picked, ask for a name; returns false if the driver cancelled (the dropdown goes back)
+function pickCustom(sel, previous) {
+  if (sel.value !== OTHER) return true;
+  const name = cleanRouteName(prompt('Type your route name (for example: SAN ROQUE - DIVISORIA).\nPassengers will see it exactly like this.') || '');
+  if (!name) { fillRoute(sel, previous); return false; }
+  fillRoute(sel, name);
+  return true;
+}
 async function loadRoutes() {
+  fillRoute($('route-login'), store.get('driverRoute') || 'UNASSIGNED');   // show the saved route right away, even before the list arrives
   try {
     const r = await fetch('/api/routes');
     const j = await r.json();
-    if (!j.routes || !j.routes.length) return;
-    const ids = ['UNASSIGNED', ...j.routes.map(x => x.id)];
-    for (const sel of [$('route-login'), $('route')]) {
-      const cur = sel.value;
-      sel.innerHTML = ids.map(id => `<option>${esc(id)}</option>`).join('');
-      sel.value = ids.includes(cur) ? cur : 'UNASSIGNED';
-    }
-    const saved = store.get('driverRoute');
-    if (saved && ids.includes(saved)) $('route-login').value = saved;
+    if (j.routes && j.routes.length) routeIds = ['UNASSIGNED', ...j.routes.map(x => x.id)];
   } catch { /* keep the built-in options */ }
+  const saved = store.get('driverRoute') || 'UNASSIGNED';
+  fillRoute($('route-login'), saved);
+  fillRoute($('route'), $('route').value);
 }
 loadRoutes();
+let loginRoutePrev = 'UNASSIGNED';
+$('route-login').onfocus = () => { loginRoutePrev = $('route-login').value; };
+$('route-login').onchange = () => { pickCustom($('route-login'), loginRoutePrev); };
 
 /* ---------- sign-in ---------- */
 function register(cb) {
@@ -158,7 +175,7 @@ $('login-form').onsubmit = e => {
   testMode = !!$('test-select').value;
   plate = (testMode ? $('test-select').value : $('plate').value).trim().toUpperCase();
   key = $('key').value;
-  route = $('route-login').value;
+  route = $('route-login').value === OTHER ? 'UNASSIGNED' : $('route-login').value;
   if (!/^[A-Z0-9 -]{2,20}$/.test(plate) || (!testMode && plate.startsWith('TEST-'))) { $('login-err').textContent = 'Enter a valid plate (letters, numbers, spaces or dashes; not TEST-).'; return; }
   if (!socket.connected) { $('login-err').textContent = 'Not connected to the server yet. Wait a moment and try again.'; return; }
   register(ok => {
@@ -173,7 +190,7 @@ function startShift() {
   $('login').style.display = 'none';
   $('driver-id').textContent = testMode ? `${plate} · test` : plate;
   if (testMode) setGps('ok');      // the admin console moves test jeepneys, so no phone GPS
-  else { $('route').value = route; startGps(); }
+  else { fillRoute($('route'), route); startGps(); }
   requestWake();
   say('Shift started.');
 }
@@ -378,7 +395,7 @@ $('key').onchange = loadTests;
 socket.on('test_jeepney_update', d => {
   if (!testMode || d.plate !== plate) return;
   lastPos = { lat: d.lat, lon: d.lon };
-  if (typeof d.route === 'string' && [...$('route').options].some(o => o.value === d.route)) { $('route').value = d.route; route = d.route; }
+  if (typeof d.route === 'string' && d.route) { fillRoute($('route'), d.route); route = d.route; }
   drawMe();
 });
 function testGone(p) {
@@ -390,7 +407,10 @@ socket.on('test_jeepney_deleted', testGone);
 socket.on('alert_cleared', d => { if (d.plate === plate) $('alert').style.display = 'none'; }); // the line stays until the passenger boards or cancels
 
 /* ---------- route ---------- */
+let routePrev = route;
+$('route').onfocus = () => { routePrev = $('route').value; };
 $('route').onchange = () => {
+  if (!pickCustom($('route'), routePrev)) return;
   route = $('route').value;
   socket.emit('driver_update_route', { plate, route });
   store.set('driverRoute', route);
