@@ -242,14 +242,17 @@ function recomputeFull(s) { s.isFull = s.manualFull || s.count >= s.max; }
 function broadcastStatus(plate) { io.emit('status_update', { plate, status: jeepneyStatus[plate] }); }
 
 function emitTest(event, payload) {
-    if (testPublic) io.emit(event, payload);
-    else io.to('admin').emit(event, payload);
+    if (testPublic) return io.emit(event, payload);
+    const plate = typeof payload === 'string' ? payload : payload && payload.plate;
+    let target = io.to('admin');
+    if (plate && isTestPlate(plate)) target = target.to(`driver:${plate}`); // a driver hub "driving" this test jeepney
+    target.emit(event, payload);
 }
 
 function getAnyJeepney(plate, socket) {
     if (activeJeepneys[plate]) return activeJeepneys[plate];
     const t = testJeepneys[plate];
-    if (t && (testPublic || socket?.data?.isAdmin)) return t;
+    if (t && (testPublic || socket?.data?.isAdmin || (socket?.data?.isDriver && socket.data.plate === plate))) return t;
     return null;
 }
 
@@ -364,7 +367,7 @@ function canDrive(socket, plate) {
 }
 
 function alertDriver(plate, payload) {
-    if (isTestPlate(plate)) { io.to('admin').emit('driver_alert', payload); return true; } // demo: admin console plays the driver
+    if (isTestPlate(plate)) { io.to('admin').to(`driver:${plate}`).emit('driver_alert', payload); return true; } // demo: admin console and any driver hub on this test jeepney
     const room = `driver:${plate}`;
     const hasDriver = (io.sockets.adapter.rooms.get(room)?.size || 0) > 0;
     if (hasDriver) { io.to(room).emit('driver_alert', payload); return true; }
@@ -411,16 +414,27 @@ io.on('connection', (socket) => {
     on('driver_register', (data, cb) => {
         data = data || {};
         const plate = normalizePlate(data.plate);
-        const ok = !!plate && (DRIVER_OPEN || socket.data.isAdmin || safeEqual(data.key, DRIVER_KEY) || socket.data.isDriver);
+        const authorized = !!plate && (DRIVER_OPEN || socket.data.isAdmin || safeEqual(data.key, DRIVER_KEY) || socket.data.isDriver);
+        const ok = authorized && (!isTestPlate(plate) || !!testJeepneys[plate]); // test plates must exist
         if (ok) {
             socket.data.isDriver = true;
             socket.data.plate = plate;
             socket.join(`driver:${plate}`);
+            if (testJeepneys[plate]) socket.emit('test_jeepney_update', testJeepneys[plate]);
+            if (jeepneyStatus[plate]) socket.emit('status_update', { plate, status: jeepneyStatus[plate] });
             // deliver any passengers already waiting
             const waiting = activePings[plate]?.size || 0;
             if (waiting) socket.emit('driver_alert', { plate, message: `${waiting} passenger(s) waiting for you!`, count: waiting });
         }
         if (typeof cb === 'function') cb({ ok });
+    });
+
+    // lets the driver hub list test jeepneys it can drive (demo mode)
+    on('driver_test_list', (data, cb) => {
+        if (typeof cb !== 'function') return;
+        data = data || {};
+        const ok = DRIVER_OPEN || socket.data.isAdmin || socket.data.isDriver || safeEqual(data.key, DRIVER_KEY);
+        cb(ok ? { ok: true, jeepneys: Object.values(testJeepneys).map(t => ({ plate: t.plate, route: t.route })) } : { ok: false });
     });
 
     // ---- driver events ----
@@ -476,6 +490,8 @@ io.on('connection', (socket) => {
             }
         }
         delete activePings[plate];
+        io.to(`driver:${plate}`).emit('alert_cleared', { plate });
+        if (isTestPlate(plate)) io.to('admin').emit('alert_cleared', { plate });
     });
 
     // ---- passenger events ----
@@ -677,7 +693,10 @@ io.on('connection', (socket) => {
 
     adminOnly('admin_clear_all', () => {
         for (const id of Object.keys(testPassengers)) { cancelTestPing(id); releaseTestSeat(id); }
-        for (const plate of Object.keys(testJeepneys)) { delete jeepneyStatus[plate]; delete activePings[plate]; }
+        for (const plate of Object.keys(testJeepneys)) {
+            io.to(`driver:${plate}`).emit('test_jeepney_deleted', plate);
+            delete jeepneyStatus[plate]; delete activePings[plate];
+        }
         testJeepneys = {};
         testPassengers = {};
         emitTest('clear_all_test_objects');
