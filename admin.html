@@ -1,305 +1,398 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Admin - PARA-PO</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-dark: #121212;
-            --panel-bg: rgba(30, 30, 30, 0.85);
-            --card-bg: #1e1e1e;
-            --border-color: #333333;
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0a0;
-            --accent-green: #a3e635;
-            --accent-red: #ef4444;
-        }
-
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background: var(--bg-dark); 
-            color: var(--text-primary); 
-            padding: 0; 
-            margin: 0;
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        #map { 
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-            filter: brightness(0.85) contrast(1.1);
-        }
-
-        #sidebar { 
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            bottom: 20px;
-            width: 360px; 
-            padding: 24px; 
-            display: flex; 
-            flex-direction: column; 
-            background: var(--panel-bg); 
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-radius: 16px; 
-            border: 1px solid var(--border-color);
-            z-index: 1000;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-
-        h2 { margin-top: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;}
-        h2::before { content: ''; display: block; width: 12px; height: 12px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 10px var(--accent-green); }
-
-        select { 
-            width: 100%; 
-            padding: 12px; 
-            margin-bottom: 20px; 
-            border-radius: 8px; 
-            font-family: 'Inter', sans-serif; 
-            background: #121212; 
-            color: white; 
-            border: 1px solid var(--border-color); 
-            outline: none;
-            font-weight: 500;
-            box-sizing: border-box;
-        }
-
-        p { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 8px; }
-
-        button { 
-            width: 100%; 
-            padding: 14px; 
-            font-size: 14px; 
-            margin-bottom: 10px; 
-            border: none; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-family: 'Inter', sans-serif; 
-            transition: all 0.2s ease; 
-            box-sizing: border-box;
-        }
-
-        .btn-jeep { background: #2a2a2a; color: white; border: 1px solid #444; }
-        .btn-jeep:hover { background: #333; border-color: var(--accent-green); }
-        
-        .btn-pass { background: #2a2a2a; color: white; border: 1px solid #444; }
-        .btn-pass:hover { background: #333; border-color: var(--accent-red); }
-        
-        .btn-auto { background: rgba(163, 230, 53, 0.1); color: var(--accent-green); border: 1px solid rgba(163, 230, 53, 0.3); }
-        .btn-auto:hover { background: rgba(163, 230, 53, 0.2); }
-        
-        .btn-clear { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.3); margin-top: 10px;}
-        .btn-clear:hover { background: rgba(239, 68, 68, 0.2); }
-
-        .active-mode { box-shadow: 0 0 0 2px var(--accent-green); }
-        .active-mode-red { box-shadow: 0 0 0 2px var(--accent-red); }
-
-        #status { margin: 15px 0; font-size: 13px; color: var(--accent-green); font-weight: 600; min-height: 20px;}
-
-        .delete-list { flex-grow: 1; overflow-y: auto; margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px; }
-        .delete-item { display: flex; justify-content: space-between; align-items: center; background: #121212; padding: 12px; margin-bottom: 8px; border-radius: 8px; font-size: 13px; border: 1px solid #2a2a2a;}
-        .delete-btn { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; width: auto; margin: 0; font-size: 12px; font-weight: 600;}
-        .delete-btn:hover { background: rgba(239, 68, 68, 0.3); }
-        
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
-
-        /* Mobile Responsiveness */
-        @media (max-width: 768px) {
-            #sidebar {
-                top: auto;
-                bottom: 0;
-                left: 0;
-                width: 100%;
-                height: 55vh;
-                border-radius: 20px 20px 0 0;
-                border-bottom: none;
-                border-left: none;
-                border-right: none;
-                padding: 15px;
-            }
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin - PARA-PO Demo Console</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#121212;--panel:rgba(30,30,30,.92);--line:#333;--text:#fff;--dim:#a0a0a0;--green:#a3e635;--red:#ef4444;--amber:#fbbf24}
+*{box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);margin:0;height:100vh;height:100dvh;overflow:hidden}
+button,input,select{font-family:inherit}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+#map{position:absolute;inset:0;z-index:1;filter:brightness(.85) contrast(1.1)}
+#sidebar{position:absolute;top:16px;left:16px;bottom:16px;width:390px;padding:20px;background:var(--panel);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:16px;border:1px solid var(--line);z-index:1000;box-shadow:0 10px 30px rgba(0,0,0,.5);overflow-y:auto}
+h2{margin:0 0 14px;font-size:21px;font-weight:600;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}
+#conn{width:12px;height:12px;border-radius:50%;background:var(--red)}
+#conn.on{background:var(--green);box-shadow:0 0 10px var(--green)}
+h3{font-size:13px;color:var(--dim);font-weight:600;margin:18px 0 8px}
+select,input[type=password]{width:100%;padding:10px;border-radius:8px;background:#121212;color:#fff;border:1px solid var(--line);outline:none;font-size:13px}
+.btn{padding:10px 12px;font-size:13px;border:1px solid #444;border-radius:8px;cursor:pointer;font-weight:600;background:#2a2a2a;color:#fff;transition:.15s}
+.btn:hover{background:#333}
+.btn.block{width:100%;margin-bottom:8px}
+.btn.on{box-shadow:0 0 0 2px var(--green)}
+.btn.on.pass{box-shadow:0 0 0 2px var(--red)}
+.btn.go{background:var(--green);color:#000;border:none}
+.btn.go:hover{background:#bcf258}
+.btn.warn{background:rgba(239,68,68,.12);color:#fca5a5;border-color:rgba(239,68,68,.35)}
+.btn.sm{padding:7px 10px;font-size:12px}
+.toggle{display:flex;align-items:flex-start;gap:10px;font-size:13px;margin-bottom:10px;cursor:pointer;line-height:1.35}
+.toggle input{margin-top:2px;accent-color:#a3e635}
+.toggle small{display:block;color:var(--dim)}
+.item{background:#121212;padding:10px 12px;margin-bottom:8px;border-radius:8px;font-size:13px;border:1px solid #2a2a2a}
+.item.alerting{border-color:var(--red)}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.row select{flex:1;min-width:120px;width:auto}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;background:rgba(163,230,53,.15);color:var(--green);white-space:nowrap}
+.badge.full{background:rgba(239,68,68,.2);color:var(--red)}
+.badge.ping{background:rgba(251,191,36,.15);color:var(--amber)}
+.alertbox{margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(239,68,68,.15);color:#fca5a5;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.none{color:#777;font-size:13px;margin-bottom:8px}
+#log{font-size:12px;color:var(--dim);max-height:130px;overflow-y:auto;border-top:1px solid var(--line);padding-top:8px;line-height:1.5}
+#log div:first-child{color:var(--green)}
+#login{position:fixed;inset:0;z-index:10000;background:var(--bg);display:none;flex-direction:column;justify-content:center;align-items:center;padding:24px}
+#login form{width:100%;max-width:320px;display:flex;flex-direction:column;gap:12px}
+#login h1{margin:0;font-size:26px}
+#login-err{color:#fca5a5;font-size:14px;min-height:20px}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#444;border-radius:10px}
+.dist-tip{background:#1e1e1e!important;color:var(--green)!important;border:1px solid #333!important;font-weight:600!important}
+.dist-tip::before{display:none}
+@media(max-width:768px){#sidebar{top:auto;bottom:0;left:0;width:100%;height:58vh;border-radius:20px 20px 0 0;border-width:1px 0 0;padding:14px}}
+</style>
 </head>
 <body>
-    <div id="sidebar">
-        <h2>Admin Hub</h2>
-        <select id="admin-route">
-            <option value="AYALA">Ayala Route</option>
-            <option value="SINNUNUC">Sinnunuc Route</option>
-        </select>
+<div id="login">
+  <form id="login-form">
+    <h1>Admin sign-in</h1>
+    <input id="token" type="password" placeholder="Admin token" autocomplete="off" required>
+    <div id="login-err" role="alert"></div>
+    <button class="btn go">Sign in</button>
+  </form>
+</div>
 
-        <p>1. Select mode:</p>
-        <button id="btn-jeep" class="btn-jeep" onclick="setMode('jeepney')">📍 Place Test Jeepney</button>
-        <button id="btn-pass" class="btn-pass" onclick="setMode('passenger')">🧍 Place Test Passenger</button>
-        
-        <p style="margin-top: 15px;">2. Click map to place.</p>
-        
-        <button id="btn-auto" class="btn-auto" onclick="toggleAutoMove()">🚦 Start Auto-Move (Follow Road)</button>
-        <button class="btn-clear" onclick="socket.emit('admin_clear_all')">🗑️ Clear All Entities</button>
+<div id="sidebar">
+  <h2><span id="conn"></span>Demo Console</h2>
 
-        <p id="status">Status: Ready.</p>
-        <div class="delete-list" id="delete-list"></div>
-    </div>
-    <div id="map"></div>
+  <h3>Demo options</h3>
+  <label class="toggle"><input type="checkbox" id="public"><span>Show test jeepneys to commuters<small>Lets a phone on the passenger page ping and ride them. Alerts for test jeepneys appear here.</small></span></label>
+  <label class="toggle"><input type="checkbox" id="auto"><span>Auto-drive to pinging passengers<small>Follows real roads (needs internet for routing).</small></span></label>
+  <label class="toggle"><input type="checkbox" id="autoboard" checked><span>Auto-board when the jeepney arrives<small>Only for test passengers.</small></span></label>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 14);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  <h3>Set up</h3>
+  <button id="scenario" class="btn block go">▶ Load demo scenario (2 jeepneys, 2 passengers)</button>
+  <select id="route" aria-label="Route for new test jeepneys" style="margin-bottom:8px"><option>AYALA</option><option>SINNUNUC</option><option>UNASSIGNED</option></select>
+  <button id="btn-jeep" class="btn block">📍 Place test jeepney</button>
+  <button id="btn-pass" class="btn block pass">🧍 Place test passenger</button>
+  <button id="btn-clear" class="btn block warn">🗑️ Clear all test objects</button>
 
-        const socket = io();
-        let currentMode = null;
-        let markers = {}; 
-        let isAutoMoving = false;
-        let moveIntervals = {};
+  <h3>Test jeepneys (you are the driver)</h3>
+  <div id="jeeps"></div>
 
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('status').innerText = `Mode: Click map to place ${mode}`;
-            document.getElementById('btn-jeep').classList.remove('active-mode');
-            document.getElementById('btn-pass').classList.remove('active-mode-red');
-            if(mode === 'jeepney') document.getElementById('btn-jeep').classList.add('active-mode');
-            if(mode === 'passenger') document.getElementById('btn-pass').classList.add('active-mode-red');
-        }
+  <h3>Test passengers</h3>
+  <div id="pass"></div>
 
-        map.on('click', (e) => {
-            if (!currentMode) return;
-            if(currentMode === 'jeepney') {
-                socket.emit('admin_place_test_jeepney', { lat: e.latlng.lat, lon: e.latlng.lng, route: document.getElementById('admin-route').value });
-            } else if (currentMode === 'passenger') {
-                socket.emit('admin_place_test_passenger', { lat: e.latlng.lat, lon: e.latlng.lng });
-            }
-            currentMode = null;
-            document.getElementById('status').innerText = "Status: Placed successfully!";
-            document.getElementById('btn-jeep').classList.remove('active-mode');
-            document.getElementById('btn-pass').classList.remove('active-mode-red');
-        });
+  <h3>Live jeepneys (real drivers / ESP)</h3>
+  <div id="live"></div>
 
-        async function getRoadRoute(startLat, startLon, endLat, endLon) {
-            try {
-                const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&overview=full`);
-                const data = await res.json();
-                if(data.routes && data.routes.length > 0) {
-                    return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-                }
-            } catch(e) { console.error("Routing error", e); }
-            return [[startLat, startLon], [endLat, endLon]]; 
-        }
+  <h3>Activity</h3>
+  <div id="log" aria-live="polite"></div>
+</div>
+<div id="map"></div>
 
-        function toggleAutoMove() {
-            isAutoMoving = !isAutoMoving;
-            const btn = document.getElementById('btn-auto');
-            if (isAutoMoving) {
-                btn.innerText = "🛑 Stop Auto-Move";
-                btn.style.background = "rgba(239, 68, 68, 0.2)";
-                btn.style.color = "#ef4444";
-                btn.style.borderColor = "#ef4444";
-                document.getElementById('status').innerText = "Auto-Move Active. Jeepneys will drive to pinged passengers.";
-            } else {
-                btn.innerText = "🚦 Start Auto-Move (Follow Road)";
-                btn.style.background = "rgba(163, 230, 53, 0.1)";
-                btn.style.color = "#a3e635";
-                btn.style.borderColor = "rgba(163, 230, 53, 0.3)";
-                document.getElementById('status').innerText = "Auto-Move Stopped.";
-                for(let plate in moveIntervals) { clearInterval(moveIntervals[plate]); }
-                moveIntervals = {};
-            }
-        }
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const routeLabel = r => (typeof r === 'string' && r) ? r : (r ? 'Custom' : 'Not set');
+const ROUTES = ['AYALA', 'SINNUNUC', 'UNASSIGNED'];
 
-        socket.on('admin_route_to_passenger', async (data) => {
-            if (!isAutoMoving) return;
-            const plate = data.plate;
-            if (markers[plate]) {
-                document.getElementById('status').innerText = `Routing ${plate} to passenger...`;
-                const start = markers[plate].getLatLng();
-                
-                const routePath = await getRoadRoute(start.lat, start.lng, data.passLat, data.passLon);
-                let step = 0;
+const map = L.map('map', { zoomControl: false }).setView([6.9273, 122.0588], 15);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
 
-                if (moveIntervals[plate]) clearInterval(moveIntervals[plate]);
-                
-                moveIntervals[plate] = setInterval(() => {
-                    if (!isAutoMoving || step >= routePath.length) {
-                        clearInterval(moveIntervals[plate]);
-                        delete moveIntervals[plate];
-                        return;
-                    }
-                    const newPos = routePath[step];
-                    markers[plate].setLatLng(newPos);
-                    socket.emit('admin_move_test_jeepney', { plate: plate, lat: newPos[0], lon: newPos[1] });
-                    step++;
-                }, 500); 
-            }
-        });
+const socket = io();
+const status = {}, liveJeeps = {}, liveMarkers = {};
+const testJeeps = {}, testMarkers = {}, testPass = {}, passMarkers = {}, lines = {};
+const alerts = {}, sel = {}, moveTimers = {};
+let mode = null;
 
-        function createJeepMarker(data) {
-            if (markers[data.plate]) return;
-            const icon = L.divIcon({ html: '<div style="font-size: 24px; filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));">🚐</div>', iconSize: [30, 30], className: '' });
-            const marker = L.marker([data.lat, data.lon], {icon: icon, draggable: true}).addTo(map).bindPopup(`Test Jeep: ${data.plate}`);
-            
-            marker.on('dragend', (e) => {
-                const newPos = e.target.getLatLng();
-                setTimeout(() => { socket.emit('admin_move_test_jeepney', { plate: data.plate, lat: newPos.lat, lon: newPos.lng }); }, 50);
-            });
-            
-            markers[data.plate] = marker;
-            updateDeleteList();
-        }
+const emoji = (e, size) => L.divIcon({ html: `<div style="font-size:${size}px;filter:drop-shadow(0 0 5px rgba(0,0,0,.6))">${e}</div>`, iconSize: [30, 30], iconAnchor: [15, 15], className: '' });
+function log(msg) {
+  const d = document.createElement('div');
+  d.textContent = `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}  ${msg}`;
+  $('log').prepend(d);
+  while ($('log').children.length > 40) $('log').lastChild.remove();
+}
 
-        function createPassengerMarker(data) {
-            if (markers[data.id]) return;
-            const icon = L.divIcon({ html: '<div style="font-size: 24px; filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));">🧍</div>', iconSize: [30, 30], className: '' });
-            markers[data.id] = L.marker([data.lat, data.lon], {icon: icon}).addTo(map).bindPopup(`Test Passenger: ${data.id}`);
-            updateDeleteList();
-        }
+/* ---------- auth ---------- */
+const tok = { get() { try { return sessionStorage.getItem('adminToken') || ''; } catch { return ''; } }, set(v) { try { sessionStorage.setItem('adminToken', v); } catch {} } };
+function login(token) {
+  socket.emit('admin_login', token, res => {
+    if (res && res.ok) { tok.set(token); $('login').style.display = 'none'; log('Signed in.'); }
+    else { $('login').style.display = 'flex'; $('login-err').textContent = token ? 'That token was not accepted.' : ''; }
+  });
+}
+socket.on('connect', () => { $('conn').className = 'on'; login(tok.get()); });
+socket.on('disconnect', () => { $('conn').className = ''; log('Disconnected. Reconnecting…'); });
+$('login-form').onsubmit = e => { e.preventDefault(); login($('token').value); };
 
-        socket.on('initial_test_jeepneys', (data) => { for (let plate in data) createJeepMarker(data[plate]); });
-        socket.on('initial_test_passengers', (data) => { for (let id in data) createPassengerMarker(data[id]); });
+/* ---------- helpers ---------- */
+const allJeeps = () => ({ ...liveJeeps, ...testJeeps });
+function jeepLatLng(plate) {
+  const m = testMarkers[plate] || liveMarkers[plate];
+  return m ? m.getLatLng() : null;
+}
+function nearestJeep(p) {
+  let best = null, bd = Infinity;
+  for (const plate in allJeeps()) {
+    const ll = jeepLatLng(plate); if (!ll) continue;
+    const d = map.distance([p.lat, p.lon], ll);
+    if (d < bd) { bd = d; best = plate; }
+  }
+  return best;
+}
+function syncLines() {
+  for (const id in lines) if (!testPass[id] || !testPass[id].pingPlate) { map.removeLayer(lines[id]); delete lines[id]; }
+  for (const id in testPass) {
+    const p = testPass[id], ll = p.pingPlate && jeepLatLng(p.pingPlate);
+    if (!ll) continue;
+    const pts = [[p.lat, p.lon], ll];
+    if (!lines[id]) lines[id] = L.polyline(pts, { color: '#fbbf24', weight: 3, dashArray: '8,8' }).addTo(map);
+    else lines[id].setLatLngs(pts);
+    lines[id].bindTooltip(`${Math.round(map.distance(pts[0], pts[1]))} m`, { permanent: true, direction: 'center', className: 'dist-tip' }).openTooltip();
+  }
+}
 
-        socket.on('test_jeepney_update', (data) => {
-            if (!markers[data.plate]) createJeepMarker(data);
-            else if (!moveIntervals[data.plate]) markers[data.plate].setLatLng([data.lat, data.lon]);
-        });
+/* ---------- live jeepneys ---------- */
+function renderLive() {
+  const plates = Object.keys(liveJeeps);
+  $('live').innerHTML = plates.length ? plates.map(p => {
+    const s = status[p] || { count: 0, max: 20, isFull: false };
+    return `<div class="item"><div class="head"><b>🚌 ${esc(p)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div><div style="color:var(--dim);margin-top:4px">${esc(routeLabel(liveJeeps[p].route))}</div></div>`;
+  }).join('') : '<div class="none">No real drivers online. Use test jeepneys to demo.</div>';
+}
+function upsertLive(d) {
+  if (!d || !d.plate) return;
+  const isNew = !liveJeeps[d.plate];
+  liveJeeps[d.plate] = d;
+  const ll = [d.lat, d.lon];
+  if (liveMarkers[d.plate]) liveMarkers[d.plate].setLatLng(ll);
+  else liveMarkers[d.plate] = L.marker(ll, { icon: emoji('🚌', 26) }).addTo(map).bindPopup(`Live: ${esc(d.plate)}`);
+  renderLive(); syncLines();
+  if (isNew) renderPass();
+}
+function removeLive(plate) {
+  if (liveMarkers[plate]) map.removeLayer(liveMarkers[plate]);
+  delete liveMarkers[plate]; delete liveJeeps[plate]; delete status[plate];
+  renderLive(); renderPass(); log(`${plate} went offline.`);
+}
+socket.on('initial_jeepneys', data => {
+  for (const p of Object.keys(liveJeeps)) if (!(p in data)) removeLive(p);
+  for (const p in data) upsertLive(data[p]);
+});
+socket.on('initial_status', data => { Object.assign(status, data); renderAll(); });
+socket.on('status_update', ({ plate, status: s }) => { status[plate] = s; renderAll(); });
+socket.on('jeepney_update', upsertLive);
+socket.on('jeepney_removed', removeLive);
 
-        socket.on('test_passenger_update', (data) => { if (!markers[data.id]) createPassengerMarker(data); });
+/* ---------- placing ---------- */
+function setMode(m) {
+  mode = mode === m ? null : m;
+  $('btn-jeep').classList.toggle('on', mode === 'jeepney');
+  $('btn-pass').classList.toggle('on', mode === 'passenger');
+  if (mode) log(`Click the map to place a test ${mode}.`);
+}
+$('btn-jeep').onclick = () => setMode('jeepney');
+$('btn-pass').onclick = () => setMode('passenger');
+map.on('click', e => {
+  if (!mode) return;
+  const { lat, lng } = e.latlng;
+  if (mode === 'jeepney') socket.emit('admin_place_test_jeepney', { lat, lon: lng, route: $('route').value });
+  else socket.emit('admin_place_test_passenger', { lat, lon: lng });
+  mode = null; $('btn-jeep').classList.remove('on'); $('btn-pass').classList.remove('on');
+});
+$('btn-clear').onclick = () => { if (confirm('Remove all test jeepneys and passengers?')) { stopMoves(); socket.emit('admin_clear_all'); } };
+$('scenario').onclick = () => {
+  const c = map.getCenter();
+  const jeeps = [[0.0030, -0.0030, 'AYALA'], [-0.0030, 0.0040, 'SINNUNUC']];
+  const pass = [[0, 0], [-0.0010, 0.0020]];
+  for (const [dy, dx, route] of jeeps) socket.emit('admin_place_test_jeepney', { lat: c.lat + dy, lon: c.lng + dx, route });
+  for (const [dy, dx] of pass) socket.emit('admin_place_test_passenger', { lat: c.lat + dy, lon: c.lng + dx });
+  log('Scenario loaded. Ping from a passenger card, then answer the alert on the jeepney card.');
+};
+$('public').onchange = e => socket.emit('admin_set_public_test', e.target.checked);
+socket.on('test_public_state', v => { $('public').checked = !!v; log(v ? 'Commuters can now see test jeepneys.' : 'Test jeepneys are hidden from commuters.'); });
 
-        socket.on('test_jeepney_deleted', (plate) => { if(markers[plate]) { map.removeLayer(markers[plate]); delete markers[plate]; updateDeleteList(); } });
-        socket.on('test_passenger_deleted', (id) => { if(markers[id]) { map.removeLayer(markers[id]); delete markers[id]; updateDeleteList(); } });
-        socket.on('clear_all_test_objects', () => {
-            for(let id in markers) map.removeLayer(markers[id]);
-            markers = {}; updateDeleteList();
-            document.getElementById('status').innerText = "Status: Cleared all.";
-        });
+/* ---------- test jeepneys ---------- */
+function renderJeeps() {
+  const plates = Object.keys(testJeeps);
+  $('jeeps').innerHTML = plates.length ? plates.map(plate => {
+    const s = status[plate] || { count: 0, max: 20, isFull: false, manualFull: false };
+    const a = alerts[plate];
+    return `<div class="item ${a ? 'alerting' : ''}" data-plate="${esc(plate)}">
+      <div class="head"><b>🚐 ${esc(plate)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div>
+      <div class="row">
+        <select data-act="route" aria-label="Route">${ROUTES.map(r => `<option ${testJeeps[plate].route === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+        <button class="btn sm" data-act="minus" aria-label="One fewer passenger">−</button>
+        <button class="btn sm" data-act="plus" aria-label="One more passenger">+</button>
+        <button class="btn sm ${s.manualFull ? 'warn' : ''}" data-act="full">${s.manualFull ? 'Reopen' : 'Mark full'}</button>
+        <button class="btn sm warn" data-act="remove">Remove</button>
+      </div>
+      ${a ? `<div class="alertbox"><span>🔔 ${esc(a)}</span><button class="btn sm go" data-act="ack">I see them</button></div>` : ''}
+    </div>`;
+  }).join('') : '<div class="none">None yet. Load the demo scenario or place one.</div>';
+}
+function jeepAction(plate, act, value) {
+  const s = status[plate] || { count: 0, manualFull: false };
+  if (act === 'route') socket.emit('driver_update_route', { plate, route: value });
+  else if (act === 'plus') socket.emit('driver_set_count', { plate, count: s.count + 1 });
+  else if (act === 'minus') socket.emit('driver_set_count', { plate, count: s.count - 1 });
+  else if (act === 'full') socket.emit('toggle_full', { plate, isFull: !s.manualFull });
+  else if (act === 'ack') { socket.emit('driver_acknowledge', { plate }); delete alerts[plate]; renderJeeps(); log(`${plate} driver acknowledged the passengers.`); }
+  else if (act === 'remove') { if (moveTimers[plate]) { clearInterval(moveTimers[plate]); delete moveTimers[plate]; } socket.emit('admin_delete_test_jeepney', plate); }
+}
+$('jeeps').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  jeepAction(b.closest('[data-plate]').dataset.plate, b.dataset.act);
+});
+$('jeeps').addEventListener('change', e => {
+  const s = e.target.closest('select[data-act]'); if (!s) return;
+  jeepAction(s.closest('[data-plate]').dataset.plate, 'route', s.value);
+});
 
-        function updateDeleteList() {
-            const list = document.getElementById('delete-list');
-            list.innerHTML = '';
-            for (let id in markers) {
-                const isJeep = id.startsWith('TEST');
-                const div = document.createElement('div');
-                div.className = 'delete-item';
-                div.innerHTML = `<span>${isJeep ? '🚐 ' : '🧍 '}${id}</span>
-                                 <button class="delete-btn" onclick="deleteItem('${id}', '${isJeep ? 'jeepney' : 'passenger'}')">REMOVE</button>`;
-                list.appendChild(div);
-            }
-        }
+function addTestJeep(d) {
+  const prev = testJeeps[d.plate];
+  testJeeps[d.plate] = d;
+  if (!testMarkers[d.plate]) {
+    const m = L.marker([d.lat, d.lon], { icon: emoji('🚐', 28), draggable: true }).addTo(map).bindPopup(`Test jeepney: ${esc(d.plate)}`);
+    m.on('dragend', ev => { const p = ev.target.getLatLng(); socket.emit('admin_move_test_jeepney', { plate: d.plate, lat: p.lat, lng: p.lng, lon: p.lng }); });
+    testMarkers[d.plate] = m;
+  } else if (!moveTimers[d.plate]) testMarkers[d.plate].setLatLng([d.lat, d.lon]);
+  if (!prev || prev.route !== d.route) { renderJeeps(); renderPass(); }
+  syncLines();
+}
+socket.on('initial_test_jeepneys', data => { for (const p in data) addTestJeep(data[p]); });
+socket.on('test_jeepney_update', addTestJeep);
+socket.on('test_jeepney_deleted', plate => {
+  if (testMarkers[plate]) map.removeLayer(testMarkers[plate]);
+  delete testMarkers[plate]; delete testJeeps[plate]; delete alerts[plate]; delete status[plate];
+  renderJeeps(); renderPass(); syncLines();
+});
 
-        function deleteItem(id, type) {
-            if(type === 'jeepney') socket.emit('admin_delete_test_jeepney', id);
-            else socket.emit('admin_delete_test_passenger', id);
-        }
-    </script>
+/* ---------- test passengers ---------- */
+function renderPass() {
+  const ids = Object.keys(testPass);
+  const jeepList = Object.keys(allJeeps());
+  $('pass').innerHTML = ids.length ? ids.map(id => {
+    const p = testPass[id];
+    if (!jeepList.includes(sel[id])) sel[id] = nearestJeep(p) || '';
+    const state = p.boarded ? `<span class="badge">Riding ${esc(p.boarded)}</span>` : p.pingPlate ? `<span class="badge ping">Pinging ${esc(p.pingPlate)}</span>` : '<span class="badge" style="background:#2a2a2a;color:#aaa">Waiting</span>';
+    const opts = jeepList.map(pl => {
+      const ll = jeepLatLng(pl), d = ll ? Math.round(map.distance([p.lat, p.lon], ll)) : null;
+      return `<option value="${esc(pl)}" ${sel[id] === pl ? 'selected' : ''}>${esc(pl)}${d !== null ? ` (${d} m)` : ''}</option>`;
+    }).join('');
+    const picker = jeepList.length ? `<select data-act="pick" aria-label="Jeepney">${opts}</select>` : '';
+    let btns;
+    if (p.boarded) btns = '<button class="btn sm" data-act="down">Get off</button>';
+    else if (p.pingPlate) btns = '<button class="btn sm" data-act="cancel">Cancel ping</button><button class="btn sm go" data-act="board">Board</button>';
+    else btns = '<button class="btn sm go" data-act="ping">📢 Ping</button><button class="btn sm" data-act="board">Board</button>';
+    return `<div class="item" data-id="${esc(id)}"><div class="head"><b>🧍 ${esc(id)}</b>${state}</div>
+      <div class="row">${picker}${btns}<button class="btn sm warn" data-act="remove">Remove</button></div></div>`;
+  }).join('') : '<div class="none">None yet.</div>';
+}
+$('pass').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const id = b.closest('[data-id]').dataset.id, plate = sel[id];
+  const act = b.dataset.act;
+  if (act === 'ping') { if (!plate) return log('Add a jeepney first.'); socket.emit('admin_test_ping', { id, plate }); }
+  else if (act === 'cancel') socket.emit('admin_test_cancel_ping', { id });
+  else if (act === 'board') { if (!plate) return log('Add a jeepney first.'); socket.emit('admin_test_board', { id, plate }); }
+  else if (act === 'down') socket.emit('admin_test_disembark', { id });
+  else if (act === 'remove') socket.emit('admin_delete_test_passenger', id);
+});
+$('pass').addEventListener('change', e => {
+  const s = e.target.closest('select[data-act="pick"]'); if (!s) return;
+  sel[s.closest('[data-id]').dataset.id] = s.value;
+});
+
+function addTestPass(d) {
+  const prev = testPass[d.id];
+  testPass[d.id] = d;
+  if (!passMarkers[d.id]) {
+    const m = L.marker([d.lat, d.lon], { icon: emoji('🧍', 28), draggable: true }).addTo(map).bindPopup(`Test passenger: ${esc(d.id)}`);
+    m.on('dragend', ev => {
+      const p = ev.target.getLatLng();
+      if (testPass[d.id].boarded) return m.setLatLng([testPass[d.id].lat, testPass[d.id].lon]); // riders can't be dragged off
+      socket.emit('admin_move_test_passenger', { id: d.id, lat: p.lat, lon: p.lng });
+    });
+    passMarkers[d.id] = m;
+  } else passMarkers[d.id].setLatLng([d.lat, d.lon]);
+  passMarkers[d.id].setOpacity(d.boarded ? 0 : 1);
+  if (!prev || prev.boarded !== d.boarded || prev.pingPlate !== d.pingPlate) renderPass();
+  syncLines();
+}
+socket.on('initial_test_passengers', data => { for (const p in data) addTestPass(data[p]); });
+socket.on('test_passenger_update', addTestPass);
+socket.on('test_passenger_deleted', id => {
+  if (passMarkers[id]) map.removeLayer(passMarkers[id]);
+  delete passMarkers[id]; delete testPass[id]; delete sel[id];
+  renderPass(); syncLines();
+});
+socket.on('clear_all_test_objects', () => {
+  for (const m of [...Object.values(testMarkers), ...Object.values(passMarkers)]) map.removeLayer(m);
+  for (const o of [testMarkers, passMarkers, testJeeps, testPass, alerts, sel]) for (const k of Object.keys(o)) delete o[k];
+  stopMoves(); renderJeeps(); renderPass(); syncLines(); log('Cleared all test objects.');
+});
+
+/* ---------- alerts and ping feedback ---------- */
+socket.on('driver_alert', d => {
+  if (!testJeeps[d.plate]) return;          // real drivers handle their own alerts
+  alerts[d.plate] = d.message; renderJeeps();
+  log(`${d.plate}: ${d.message}`);
+});
+socket.on('ping_cancelled', d => {
+  if (!testJeeps[d.plate]) return;
+  if (d.remaining > 0) alerts[d.plate] = `${d.remaining} passenger(s) still waiting`; else delete alerts[d.plate];
+  renderJeeps(); log(`A ping to ${d.plate} was cancelled.`);
+});
+socket.on('test_ping_acknowledged', d => log(`${d.id} saw that ${d.plate} acknowledged.`));
+socket.on('test_ping_expired', d => { delete alerts[d.plate]; renderJeeps(); log(`${d.id}'s ping to ${d.plate} ended (${d.reason}).`); });
+socket.on('test_ping_result', r => {
+  if (r.error) log(`${r.id}: ${r.error}`);
+  else log(`${r.id} pinged ${r.plate} from ${Math.round(r.distance)} m${r.driverOnline ? '' : ' (no driver online)'}.`);
+});
+
+/* ---------- auto-drive ---------- */
+function stopMoves() { for (const p of Object.keys(moveTimers)) { clearInterval(moveTimers[p]); delete moveTimers[p]; } }
+$('auto').onchange = e => { if (!e.target.checked) stopMoves(); };
+async function roadRoute(aLat, aLon, bLat, bLon) {
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${aLon},${aLat};${bLon},${bLat}?geometries=geojson&overview=full`);
+    const j = await r.json();
+    if (j.routes && j.routes.length) return j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+  } catch (e) { console.error('Routing error', e); }
+  return [[aLat, aLon], [bLat, bLon]];
+}
+socket.on('admin_route_to_passenger', async ({ plate, passLat, passLon, passengerId }) => {
+  if (!$('auto').checked || !testMarkers[plate]) return; // only test jeepneys can be driven from here
+  const start = testMarkers[plate].getLatLng();
+  log(`${plate} is driving to the passenger…`);
+  const path = await roadRoute(start.lat, start.lng, passLat, passLon);
+  if (moveTimers[plate]) clearInterval(moveTimers[plate]);
+  let i = 0;
+  moveTimers[plate] = setInterval(() => {
+    if (!$('auto').checked || !testMarkers[plate] || i >= path.length) {
+      clearInterval(moveTimers[plate]); delete moveTimers[plate];
+      if ($('auto').checked && testMarkers[plate]) {
+        log(`${plate} arrived.`);
+        if (passengerId && $('autoboard').checked && testPass[passengerId] && !testPass[passengerId].boarded) socket.emit('admin_test_board', { id: passengerId, plate });
+      }
+      return;
+    }
+    const [lat, lon] = path[i++];
+    testMarkers[plate].setLatLng([lat, lon]);
+    socket.emit('admin_move_test_jeepney', { plate, lat, lon });
+    syncLines();
+  }, 500);
+});
+
+function renderAll() { renderJeeps(); renderLive(); renderPass(); }
+renderAll();
+</script>
 </body>
 </html>
