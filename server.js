@@ -102,7 +102,7 @@ function getDistance(lat1, lon1, lat2, lon2) { // Haversine, meters (straight-li
 
 // ==================== ROUTE CATALOG ====================
 // STARTER DATA: each route is a list of named stops. Stop coordinates are looked up from OpenStreetMap
-// (Nominatim) at startup and cached in .geocache.json, so nothing here is hand-typed GPS.
+// at startup and cached in .geocache.json, so nothing here is hand-typed GPS.
 // Edit this list to match the real LTFRB / city route franchises. A route is drawn as a line from
 // ROUTE_ANCHOR (downtown) out through its stops, ordered by distance from the anchor.
 // Keep ids short and unique; drivers pick them from a dropdown. 'UNASSIGNED' is added by the pages.
@@ -166,58 +166,145 @@ const ROUTE_CATALOG = [
     { id: 'BUS TERMINAL', stops: ['Zamboanga Integrated Bus Terminal'] }
 ];
 
-const GEO_CACHE_FILE = path.join(__dirname, '.geocache.json');
+// ---- stop lookup (done once, then remembered) ----
+// Where looked-up stops are remembered. Point GEO_CACHE_FILE at a persistent disk if your host wipes files
+// on restart. geocache.seed.json (optional, committed to git) is loaded first, so a fresh deploy already
+// knows every stop and routes are ready instantly.
+const GEO_CACHE_FILE = process.env.GEO_CACHE_FILE || path.join(__dirname, '.geocache.json');
+const GEO_SEED_FILE = path.join(__dirname, 'geocache.seed.json');
 let geoCache = {};
-try { geoCache = JSON.parse(fs.readFileSync(GEO_CACHE_FILE, 'utf8')) || {}; } catch { geoCache = {}; }
+for (const f of [GEO_SEED_FILE, GEO_CACHE_FILE]) {
+    try { Object.assign(geoCache, JSON.parse(fs.readFileSync(f, 'utf8')) || {}); } catch { /* not there yet */ }
+}
 let routesReady = false;
 const routePaths = {}; // id -> { path: [[lat, lon], ...], names: [stop names in path order, anchor excluded] }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// progress that the passenger page turns into a loading bar
+const routeProgress = { done: 0, total: 0, missing: 0, routesReady: 0, routesTotal: ROUTE_CATALOG.length, finished: false };
+function getProgress() {
+    const pct = routeProgress.total ? Math.round(routeProgress.done / routeProgress.total * 100) : 0;
+    return { ...routeProgress, percent: Math.min(100, pct) };
+}
+const emitProgress = () => io.emit('routes_progress', getProgress());
 
-async function geocodeStop(name) {
-    if (geoCache[name]) return geoCache[name];
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function saveGeoCache() { try { fs.writeFileSync(GEO_CACHE_FILE, JSON.stringify(geoCache)); } catch { /* read-only disk is fine */ } }
+
+const GEO_UA = { 'User-Agent': 'PARA-PO/1.0 (jeepney tracker)' };
+const ALT_SPELLING = { 'Sinunuc': ['Sinunoc'] };   // OpenStreetMap may spell it differently
+const warned = new Set();
+const warnOnce = (msg) => { if (!warned.has(msg)) { warned.add(msg); console.warn('[routes]', msg); } };
+const looksLikeWholeCity = (props, stop) => /^zamboanga( city)?$/i.test(String(props.name || '').trim()) && !/zamboanga/i.test(stop);
+
+// Fast lookup: Photon (OpenStreetMap data). No 1-per-second limit, so several run at once.
+async function photonLookup(stop, query) {
+    const url = 'https://photon.komoot.io/api/?limit=3&bbox=121.85,6.85,122.35,7.25&q=' + encodeURIComponent(query + ', Zamboanga City');
     try {
-        const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&bounded=1' +
-            '&viewbox=121.85,7.25,122.35,6.85&q=' + encodeURIComponent(name + ', Zamboanga City');
-        const r = await fetch(url, { headers: { 'User-Agent': 'PARA-PO/1.0 (jeepney tracker)' }, signal: AbortSignal.timeout(8000) });
-        if (!r.ok) return null;
+        const r = await fetch(url, { headers: GEO_UA, signal: AbortSignal.timeout(6000) });
+        if (!r.ok) { warnOnce(`Photon answered HTTP ${r.status}; falling back to Nominatim for missing stops.`); return null; }
+        const j = await r.json();
+        for (const f of (j && j.features) || []) {
+            const c = f && f.geometry && f.geometry.coordinates;
+            if (!Array.isArray(c)) continue;
+            const lon = parseFloat(c[0]), lat = parseFloat(c[1]);
+            if (!validCoords(lat, lon)) continue;
+            if (looksLikeWholeCity(f.properties || {}, stop)) continue; // "not found" often returns the city itself
+            return { lat, lon };
+        }
+    } catch (e) { warnOnce(`Photon request failed (${e.message}); falling back to Nominatim for missing stops.`); }
+    return null;
+}
+
+// Slow but thorough lookup: Nominatim (OpenStreetMap). Allowed about 1 request per second.
+async function nominatimLookup(stop, query) {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&bounded=1' +
+        '&viewbox=121.85,7.25,122.35,6.85&q=' + encodeURIComponent(query + ', Zamboanga City');
+    try {
+        const r = await fetch(url, { headers: GEO_UA, signal: AbortSignal.timeout(6000) });
+        if (!r.ok) { warnOnce(`Nominatim answered HTTP ${r.status} (this host may be blocked or rate-limited).`); return null; }
         const j = await r.json();
         if (!Array.isArray(j) || !j.length) return null;
         const lat = parseFloat(j[0].lat), lon = parseFloat(j[0].lon);
-        if (!validCoords(lat, lon)) return null;
-        geoCache[name] = { lat, lon };
-        return geoCache[name];
-    } catch (e) {
-        console.warn('[routes] geocode failed for', name, e.message);
-        return null;
-    }
+        return validCoords(lat, lon) ? { lat, lon } : null;
+    } catch (e) { warnOnce(`Nominatim request failed (${e.message}).`); return null; }
 }
 
-async function buildRoutePaths() {
-    const names = new Set([ROUTE_ANCHOR]);
-    for (const r of ROUTE_CATALOG) for (const s of r.stops) names.add(s);
-
-    let fetched = false, missing = 0;
-    for (const n of names) {
-        const cached = !!geoCache[n];
-        const g = await geocodeStop(n);
-        if (!g) missing += 1;
-        if (!cached) { fetched = fetched || !!g; await sleep(1100); } // Nominatim allows ~1 request/second
+async function lookupWith(fn, stop) {
+    for (const q of [stop, ...(ALT_SPELLING[stop] || [])]) {
+        const g = await fn(stop, q);
+        if (g) { geoCache[stop] = g; return g; }
     }
-    if (fetched) { try { fs.writeFileSync(GEO_CACHE_FILE, JSON.stringify(geoCache)); } catch { /* read-only disk is fine */ } }
+    return null;
+}
 
+// Rebuild every route line from the stops known so far. Cheap (about 50 tiny routes), so it runs after
+// each new stop: routes become usable one by one instead of all-or-nothing at the very end.
+function rebuildRoutes() {
     const anchor = geoCache[ROUTE_ANCHOR];
+    let ready = 0;
     for (const r of ROUTE_CATALOG) {
         const entries = r.stops.filter(s => geoCache[s]).map(s => ({ name: s, lat: geoCache[s].lat, lon: geoCache[s].lon }));
         if (anchor) entries.sort((a, b) => getDistance(anchor.lat, anchor.lon, a.lat, a.lon) - getDistance(anchor.lat, anchor.lon, b.lat, b.lon));
         const pts = entries.map(e => [e.lat, e.lon]);
         const pathPts = anchor ? [[anchor.lat, anchor.lon], ...pts] : pts;
-        if (pathPts.length >= 2) routePaths[r.id] = { path: pathPts, names: entries.map(e => e.name) };
+        if (pathPts.length >= 2) { routePaths[r.id] = { path: pathPts, names: entries.map(e => e.name) }; ready += 1; }
         else delete routePaths[r.id];
     }
-    routesReady = Object.keys(routePaths).length > 0;
-    console.log(`[routes] ${Object.keys(routePaths).length}/${ROUTE_CATALOG.length} routes ready` + (missing ? `, ${missing} stop(s) could not be located` : ''));
-    if (missing) setTimeout(() => buildRoutePaths().catch(e => console.error('[routes]', e)), 10 * 60 * 1000).unref(); // retry later
+    routesReady = ready > 0;
+    routeProgress.routesReady = ready;
+}
+
+let buildRunning = false;
+async function buildRoutePaths() {
+    if (buildRunning) return;
+    buildRunning = true;
+    try {
+        const names = [...new Set([ROUTE_ANCHOR, ...ROUTE_CATALOG.flatMap(r => r.stops)])]; // anchor first
+        const quiet = routeProgress.finished;          // a later retry should not bring the loading bar back
+        const failed = new Set();
+        const todo = names.filter(n => !geoCache[n]);
+
+        const tick = () => {
+            rebuildRoutes();
+            if (quiet) return;
+            routeProgress.total = names.length;
+            routeProgress.done = names.filter(n => geoCache[n] || failed.has(n)).length;
+            routeProgress.missing = failed.size;
+            emitProgress();
+        };
+        tick();                                         // everything already remembered is usable right now
+
+        let unsaved = 0;
+        // step 1: fast lookups, 4 at a time
+        let next = 0;
+        await Promise.all(Array.from({ length: Math.min(4, todo.length) }, async () => {
+            while (next < todo.length) {
+                const n = todo[next++];
+                const g = await lookupWith(photonLookup, n);
+                if (g) unsaved += 1;
+                tick();
+                if (unsaved >= 5) { saveGeoCache(); unsaved = 0; }
+            }
+        }));
+
+        // step 2: whatever the fast lookup missed, one by one with the slower service
+        for (const n of todo.filter(x => !geoCache[x])) {
+            const g = await lookupWith(nominatimLookup, n);
+            if (g) unsaved += 1; else failed.add(n);
+            tick();
+            await sleep(1100);                          // Nominatim allows about 1 request per second
+        }
+        if (unsaved) saveGeoCache();
+
+        routeProgress.missing = failed.size;
+        routeProgress.finished = true;
+        emitProgress();
+        console.log(`[routes] ${routeProgress.routesReady}/${ROUTE_CATALOG.length} routes ready` + (failed.size ? `, ${failed.size} stop(s) could not be located: ${[...failed].join(', ')}` : ''));
+        if (todo.length && !failed.size && !fs.existsSync(GEO_SEED_FILE)) {
+            console.log('[routes] Tip: copy .geocache.json to geocache.seed.json and commit it. New deploys will then load routes instantly.');
+        }
+        if (failed.size) setTimeout(() => buildRoutePaths().catch(e => console.error('[routes]', e)), 2 * 60 * 1000).unref(); // retry soon, quietly
+    } finally { buildRunning = false; }
 }
 buildRoutePaths().catch(e => console.error('[routes]', e));
 
@@ -256,7 +343,7 @@ app.get('/api/places', (req, res) => {
 });
 
 app.get('/api/routes', (req, res) => {
-    res.json({ ready: routesReady, allowCustom: true, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
+    res.json({ ready: routesReady, progress: getProgress(), allowCustom: true, routes: ROUTE_CATALOG.map(r => ({ id: r.id, stops: r.stops })) });
 });
 
 app.post('/api/plan', (req, res) => {
@@ -264,7 +351,7 @@ app.post('/api/plan', (req, res) => {
     const b = req.body || {};
     const fromLat = Number(b.fromLat), fromLon = Number(b.fromLon), toLat = Number(b.toLat), toLon = Number(b.toLon);
     if (!validCoords(fromLat, fromLon) || !validCoords(toLat, toLon)) return res.status(400).json({ error: 'Invalid coordinates.' });
-    if (!routesReady) return res.status(503).json({ error: 'Route data is still loading. Try again in a minute.' });
+    if (!routesReady) return res.status(503).json({ error: `Route data is still loading (${getProgress().percent}%). Try again in a moment.`, progress: getProgress() });
 
     const matches = [], servesDestination = [], servesOrigin = [];
     for (const r of ROUTE_CATALOG) {
@@ -290,7 +377,13 @@ app.post('/api/plan', (req, res) => {
     matches.sort((a, b) => (a.walkToBoardM + a.walkFromAlightM) - (b.walkToBoardM + b.walkFromAlightM));
     servesDestination.sort((a, b) => a.distM - b.distM);
     servesOrigin.sort((a, b) => a.distM - b.distM);
-    res.json({ routes: matches.slice(0, 5), servesDestination: servesDestination.slice(0, 4), servesOrigin: servesOrigin.slice(0, 4) });
+    res.json({
+        routes: matches.slice(0, 5),
+        servesDestination: servesDestination.slice(0, 4),
+        servesOrigin: servesOrigin.slice(0, 4),
+        loading: !routeProgress.finished,
+        progress: getProgress()
+    });
 });
 
 // ==================== FARE + DISTANCE (server-side, so the AI never does the math) ====================
@@ -433,13 +526,13 @@ const pageFile = (name) => {
     return fs.existsSync(inPublic) ? inPublic : path.join(__dirname, name);
 };
 
-app.get('/health', (req, res) => res.json({ ok: true, jeepneys: Object.keys(activeJeepneys).length, routesReady }));
+app.get('/health', (req, res) => res.json({ ok: true, jeepneys: Object.keys(activeJeepneys).length, routesReady, routes: getProgress() }));
 app.get('/', (req, res) => res.sendFile(pageFile('index.html')));
 app.get('/driver', (req, res) => res.sendFile(pageFile('driver.html')));
 app.get(ADMIN_PATH, (req, res) => res.sendFile(pageFile('admin.html')));
 
 // Never serve server code, secrets, or the admin page by its direct filename.
-const BLOCKED = /^\/(server\.js|package(-lock)?\.json|node_modules|admin\.html|render\.yaml|dockerfile)/;
+const BLOCKED = /^\/(server\.js|package(-lock)?\.json|node_modules|admin\.html|render\.yaml|dockerfile|geocache)/;
 app.use((req, res, next) => {
     let p;
     try { p = decodeURIComponent(req.path).toLowerCase(); } catch { return res.status(400).end(); }
@@ -641,6 +734,7 @@ io.on('connection', (socket) => {
 
     socket.emit('initial_jeepneys', activeJeepneys);
     socket.emit('initial_status', jeepneyStatus);
+    socket.emit('routes_progress', getProgress());
 
     if (ADMIN_OPEN || safeEqual(auth.adminToken, ADMIN_TOKEN)) promoteAdmin(socket);
     else if (testPublic) { socket.emit('initial_test_jeepneys', testJeepneys); socket.emit('initial_test_passengers', testPassengers); }
