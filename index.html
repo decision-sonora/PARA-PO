@@ -140,11 +140,13 @@ h2{margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.5px;display:f
 }
 @media(prefers-reduced-motion:reduce){#disembark,.routebar.busy #rb-fill{animation:none}*{transition:none!important}}
 </style>
+<link rel="stylesheet" href="/theme.css">
+<script src="/theme.js"></script>
 </head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 <div id="sidebar">
-  <h2><span id="conn" title="Connecting"></span>PARA-PO Live</h2>
+  <h2><span id="conn" title="Connecting"></span>PARA-PO Live<button id="theme-toggle" class="theme-toggle" type="button"></button></h2>
   <div id="routebar" class="routebar busy" hidden role="status" aria-live="polite">
     <div class="rb-top"><span id="rb-label">Loading route data…</span><b id="rb-pct">0%</b></div>
     <div class="rb-track"><div id="rb-fill"></div></div>
@@ -309,22 +311,26 @@ function routeKind(plate) {
 function iconFor(plate) {
   const full = status[plate]?.isFull;
   const dim = plan && !goesThere(plate);
+  const c = jeepColor(jeeps[plate]);
   return L.divIcon({
-    html: `<div class="jeep-icon ${dim ? 'dim' : ''}"><div class="jeep-name ${full ? 'full' : ''}">${esc(plate)}${full ? ' · FULL' : ''}</div><div class="jeep-badge ${full ? 'full' : ''}">${I('bus', 17)}</div></div>`,
+    html: `<div class="jeep-icon ${dim ? 'dim' : ''}" style="--jc:${esc(c)}"><div class="jeep-name ${full ? 'full' : ''}">${esc(plate)}${full ? ' · FULL' : ''}</div><div class="jeep-badge ${full ? 'full' : ''}">${I('bus', 17)}</div></div>`,
     iconSize: [90, 50], iconAnchor: [45, 38], className: ''
   });
 }
 
 function upsertJeep(d) {
   if (!d || !d.plate || !Number.isFinite(d.lat) || !Number.isFinite(d.lon)) return;
-  const routeChanged = jeeps[d.plate] && routeId(jeeps[d.plate].route) !== routeId(d.route);
+  const prevJeep = jeeps[d.plate];
+  const routeChanged = prevJeep && routeId(prevJeep.route) !== routeId(d.route);
+  const c = jeepColor(d);
+  const colorChanged = prevJeep && jeepColor(prevJeep) !== c;
   jeeps[d.plate] = d;
   if (boarded && d.plate !== boarded) { renderList(); return; }
   const ll = [d.lat, d.lon];
-  if (markers[d.plate]) { markers[d.plate].setLatLng(ll); if (routeChanged && plan) markers[d.plate].setIcon(iconFor(d.plate)); }
+  if (markers[d.plate]) { markers[d.plate].setLatLng(ll); if ((routeChanged && plan) || colorChanged) markers[d.plate].setIcon(iconFor(d.plate)); }
   else markers[d.plate] = L.marker(ll, { icon: iconFor(d.plate) }).addTo(map);
-  if (rings[d.plate]) rings[d.plate].setLatLng(ll);
-  else rings[d.plate] = L.circle(ll, { color: '#a3e635', fillColor: '#a3e635', fillOpacity: .1, weight: 1, radius: NEAR_M }).addTo(map);
+  if (rings[d.plate]) { rings[d.plate].setLatLng(ll); if (colorChanged) rings[d.plate].setStyle({ color: c, fillColor: c }); }
+  else rings[d.plate] = L.circle(ll, { color: c, fillColor: c, fillOpacity: .1, weight: 1, radius: NEAR_M }).addTo(map);
 
   if (d.plate === pinged) updateLine();
   if (d.plate === boarded) { map.setView(ll, 18); updateRide(); }
@@ -383,8 +389,9 @@ function cardFor(plate) {
     actions = `<button class="btn green" data-act="ping" data-plate="${esc(plate)}" ${(s.isFull || isPending || pinged) ? 'disabled' : ''}>${isPending ? 'Pinging…' : s.isFull ? 'Jeepney is full' : I('megaphone', 15) + ' Ping driver'}</button>
                ${!pinged ? `<button class="btn" data-act="board" data-plate="${esc(plate)}" ${s.isFull ? 'disabled' : ''}>I'm already on this jeepney</button>` : ''}`;
   }
-  return `<div class="card ${isPinged ? 'pinged' : ''} ${way ? 'way' : ''}">
-    <div class="card-top"><strong>${esc(plate)}</strong><span class="badge ${s.isFull ? 'full' : 'open'}">${s.isFull ? 'Full' : `${s.count}/${s.max} seats taken`}</span></div>
+  const c = jeepColor(jeeps[plate]);
+  return `<div class="card ${isPinged ? 'pinged' : ''} ${way ? 'way' : ''}" style="border-left:4px solid ${esc(c)}">
+    <div class="card-top"><strong><span class="jdot" style="background:${esc(c)}"></span>${esc(plate)}</strong><span class="badge ${s.isFull ? 'full' : 'open'}">${s.isFull ? 'Full' : `${s.count}/${s.max} seats taken`}</span></div>
     <div class="meta">Route: ${esc(routeLabel(jeeps[plate].route))}${d !== null ? ` · ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'} ${how}` : ''}</div>
     ${way ? `<div style="margin-top:6px"><span class="badge way">${I('navigation', 12)} Goes your way</span></div>` : ''}
     ${!way && routeKind(plate) === 'custom' ? '<div style="margin-top:6px"><span class="badge custom" title="The driver typed their own route, so we cannot tell if it goes your way">Driver\'s own route · not in route list</span></div>' : ''}
@@ -559,6 +566,7 @@ class RoadLine {
     const text = `${esc(this.tag)}${hasRoad ? '' : '~'}${mins} min · ${fmtDist(len)}${hasRoad ? '' : ' (straight line)'}`;
     this.label.setLatLng(pointAt(pts, len / 2)).setIcon(L.divIcon({ className: 'road-label-wrap', iconSize: [0, 0], html: `<div class="road-label" style="background:${this.color}">${text}</div>` }));
   }
+  setColor(c) { this.color = c; this.line.setStyle({ color: c }); this.draw(); }
   clear() {
     this.token++; this.pending = false; this.road = null; this.fetchedAt = 0; this.fa = this.fb = null; this.len = 0;
     if (this.shown) { this.map.removeLayer(this.casing); this.map.removeLayer(this.line); this.map.removeLayer(this.label); }
@@ -592,7 +600,9 @@ function clearPing() {
 function updateLine() {
   const j = jeeps[pinged];
   if (!me || !j) return;
-  if (!road) road = new RoadLine(map, '#a3e635');
+  const c = jeepColor(j);
+  if (!road) road = new RoadLine(map, c);
+  else if (road.color !== c) road.setColor(c);
   road.update([j.lat, j.lon], me);
 }
 socket.on('ping_acknowledged', ({ plate }) => toast(`Driver of ${plate} saw your request.`));
@@ -757,6 +767,7 @@ function enterRide(plate) {
 function updateRide() {
   const s = status[boarded] || { count: 0, max: 20 };
   const j = jeeps[boarded];
+  $('ride-plate').style.color = jeepColor(j);
   $('ride-plate').textContent = boarded;
   $('ride-info').textContent = `Route: ${routeLabel(j?.route)} · ${s.count}/${s.max} seats taken`
     + (boardedAt ? ` · Boarded ${boardedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '')
@@ -807,7 +818,7 @@ async function askAI(text) {
     const data = await r.json();
     const reply = data.reply || data.error || 'Something went wrong.';
     typing.textContent = reply;
-    if (data.reply) history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
+    if (data.reply && !data.blocked) history.push({ role: 'user', content: text }, { role: 'assistant', content: reply, sig: data.sig });
   } catch { typing.textContent = 'Network error. Please try again.'; }
   asking = false;
 }
