@@ -53,6 +53,8 @@ select,input[type=password]{width:100%;padding:10px;border-radius:8px;background
 .road-label{transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;color:#000;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px;border:2px solid #0b0b0b;box-shadow:0 4px 12px rgba(0,0,0,.55)}
 @media(max-width:768px){#sidebar{top:auto;bottom:0;left:0;width:100%;height:58vh;border-radius:20px 20px 0 0;border-width:1px 0 0;padding:14px}}
 </style>
+<link rel="stylesheet" href="/theme.css">
+<script src="/theme.js"></script>
 </head>
 <body>
 <div id="login">
@@ -65,7 +67,7 @@ select,input[type=password]{width:100%;padding:10px;border-radius:8px;background
 </div>
 
 <div id="sidebar">
-  <h2><span id="conn"></span>Demo Console</h2>
+  <h2><span id="conn"></span>Demo Console<button id="theme-toggle" class="theme-toggle" type="button"></button></h2>
 
   <h3>Demo options</h3>
   <label class="toggle"><input type="checkbox" id="public"><span>Show test jeepneys to commuters<small>Lets a phone on the passenger page ping and ride them. Alerts for test jeepneys appear here.</small></span></label>
@@ -112,6 +114,9 @@ const alerts = {}, sel = {}, moveTimers = {};
 let mode = null;
 
 const emoji = (e, size) => L.divIcon({ html: `<div style="font-size:${size}px;filter:drop-shadow(0 0 5px rgba(0,0,0,.6))">${e}</div>`, iconSize: [30, 30], iconAnchor: [15, 15], className: '' });
+const pin = (e, c) => L.divIcon({ html: `<div class="pp-jeep-pin" style="--jc:${esc(c)}">${e}</div>`, iconSize: [36, 36], iconAnchor: [18, 18], className: '' });
+const colorOf = plate => jeepColor(testJeeps[plate] || liveJeeps[plate]);
+function paintMarker(m, e, c) { if (m._c !== c) { m._c = c; m.setIcon(pin(e, c)); } }
 function log(msg) {
   const d = document.createElement('div');
   d.textContent = `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}  ${msg}`;
@@ -213,6 +218,11 @@ class RoadLine {
     this.label = L.marker([0, 0], { interactive: false, keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'road-label-wrap', html: '', iconSize: [0, 0] }) });
     this.road = null; this.shown = false; this.pending = false; this.fetchedAt = 0; this.fa = null; this.fb = null; this.token = 0; this.len = 0;
   }
+  setColor(c) {
+    if (c === this.color) return;
+    this.color = c;
+    if (this.shown) { this.line.setStyle({ color: c }); this.draw(); }
+  }
   update(a, b) {            // a: jeepney [lat, lon], b: passenger [lat, lon]
     this.a = a; this.b = b;
     if (!this.shown) { this.casing.addTo(this.map); this.line.addTo(this.map); this.label.addTo(this.map); this.shown = true; }
@@ -275,7 +285,8 @@ function syncLines() {
   for (const id in testPass) {
     const p = testPass[id], ll = p.pingPlate && jeepLatLng(p.pingPlate);
     if (!ll) continue;
-    if (!lines[id]) { lines[id] = new RoadLine(map, '#fbbf24', `${id} · `); lines[id].plate = p.pingPlate; }
+    if (!lines[id]) { lines[id] = new RoadLine(map, colorOf(p.pingPlate), `${id} · `); lines[id].plate = p.pingPlate; }
+    else if (lines[id].color !== colorOf(p.pingPlate)) lines[id].setColor(colorOf(p.pingPlate));
     lines[id].update([ll.lat, ll.lng], [p.lat, p.lon]);
   }
 }
@@ -285,7 +296,7 @@ function renderLive() {
   const plates = Object.keys(liveJeeps);
   $('live').innerHTML = plates.length ? plates.map(p => {
     const s = status[p] || { count: 0, max: 20, isFull: false };
-    return `<div class="item"><div class="head"><b>🚌 ${esc(p)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div><div style="color:var(--dim);margin-top:4px">${esc(routeLabel(liveJeeps[p].route))}</div></div>`;
+    return `<div class="item"><div class="head"><b><span class="jdot" style="background:${esc(jeepColor(liveJeeps[p]))}"></span>🚌 ${esc(p)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div><div style="color:var(--dim);margin-top:4px">${esc(routeLabel(liveJeeps[p].route))}</div></div>`;
   }).join('') : '<div class="none">No real drivers online. Use test jeepneys to demo.</div>';
 }
 function upsertLive(d) {
@@ -293,8 +304,9 @@ function upsertLive(d) {
   const isNew = !liveJeeps[d.plate];
   liveJeeps[d.plate] = d;
   const ll = [d.lat, d.lon];
-  if (liveMarkers[d.plate]) liveMarkers[d.plate].setLatLng(ll);
-  else liveMarkers[d.plate] = L.marker(ll, { icon: emoji('🚌', 26) }).addTo(map).bindPopup(`Live: ${esc(d.plate)}`);
+  const c = jeepColor(d);
+  if (liveMarkers[d.plate]) { liveMarkers[d.plate].setLatLng(ll); paintMarker(liveMarkers[d.plate], '🚌', c); }
+  else { liveMarkers[d.plate] = L.marker(ll, { icon: pin('🚌', c) }).addTo(map).bindPopup(`Live: ${esc(d.plate)}`); liveMarkers[d.plate]._c = c; }
   renderLive(); syncLines();
   if (isNew) renderPass();
 }
@@ -348,7 +360,7 @@ function renderJeeps() {
     const a = alerts[plate];
     const cur = testJeeps[plate].route;
     return `<div class="item ${a ? 'alerting' : ''}" data-plate="${esc(plate)}">
-      <div class="head"><b>🚐 ${esc(plate)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div>
+      <div class="head"><b><span class="jdot" style="background:${esc(colorOf(plate))}"></span>🚐 ${esc(plate)}</b><span class="badge ${s.isFull ? 'full' : ''}">${s.isFull ? 'FULL ' : ''}${s.count}/${s.max}</span></div>
       <div class="row">
         <select data-act="route" aria-label="Route">${routeOptionsHtml(cur)}</select>
         <button class="btn sm" data-act="minus" aria-label="One fewer passenger">−</button>
@@ -388,10 +400,12 @@ function addTestJeep(d) {
   const prev = testJeeps[d.plate];
   testJeeps[d.plate] = d;
   if (!testMarkers[d.plate]) {
-    const m = L.marker([d.lat, d.lon], { icon: emoji('🚐', 28), draggable: true }).addTo(map).bindPopup(`Test jeepney: ${esc(d.plate)}`);
+    const m = L.marker([d.lat, d.lon], { icon: pin('🚐', jeepColor(d)), draggable: true }).addTo(map).bindPopup(`Test jeepney: ${esc(d.plate)}`);
+    m._c = jeepColor(d);
     m.on('dragend', ev => { const p = ev.target.getLatLng(); socket.emit('admin_move_test_jeepney', { plate: d.plate, lat: p.lat, lng: p.lng, lon: p.lng }); });
     testMarkers[d.plate] = m;
   } else if (!moveTimers[d.plate]) testMarkers[d.plate].setLatLng([d.lat, d.lon]);
+  paintMarker(testMarkers[d.plate], '🚐', jeepColor(d));
   if (!prev || prev.route !== d.route) { renderJeeps(); renderPass(); }
   syncLines();
 }
