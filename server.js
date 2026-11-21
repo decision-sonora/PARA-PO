@@ -430,12 +430,179 @@ function buildRouteHint(text) {
     return lines;
 }
 
-function buildVerifiedHint(message) {
+// ---- fare / distance between any two places ----
+// The commuter can ask "fare from Ayala to Cawit". The server finds both places in the message, looks up
+// their coordinates (the same ones used to draw routes), and does all the math, so the AI never has to.
+const FARE_RE = /\b(fare|fares|how much|magkano|pila|tagpila|pamasahe|pamasaje|bayad|cost|price|presyo|distance|how far|layo|malayo|kilometers?|km)\b/;
+const ROAD_FACTOR = 1.25;   // straight line is shorter than the real road, so pad it (same as the trip planner)
+const KCC_NAME = 'KCC Mall de Zamboanga';
+const KCC_MATRIX_KM = { 'Ayala': 16.0, 'Zamboanga International Airport': 3.7, 'Western Mindanao State University': 3.2, 'SM City Mindpro': 0.5 };
+const PLACE_ALIASES = {
+    'wmsu': 'Western Mindanao State University',
+    'kcc': KCC_NAME, 'kcc mall': KCC_NAME, 'kcc mall de zamboanga': KCC_NAME,
+    'sm mindpro': 'SM City Mindpro', 'sm city mindpro': 'SM City Mindpro', 'mindpro': 'SM City Mindpro',
+    'airport': 'Zamboanga International Airport', 'zamboanga airport': 'Zamboanga International Airport',
+    'zamboanga international airport': 'Zamboanga International Airport',
+    'adzu': 'Ateneo de Zamboanga University', 'ateneo': 'Ateneo de Zamboanga University',
+    'zcmc': 'Zamboanga City Medical Center', 'zamboanga city medical center': 'Zamboanga City Medical Center',
+    'bus terminal': 'Zamboanga Integrated Bus Terminal',
+    'southway': 'Southway Square', 'southway square': 'Southway Square',
+    'plaza pershing': ROUTE_ANCHOR, 'downtown': ROUTE_ANCHOR,
+    'sinunoc': 'Sinunuc', 'sinnunuc': 'Sinunuc',
+    'zone 4': 'Zone IV', 'zone iv': 'Zone IV'
+};
+
+function normText(t) {
+    return String(t || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+        .replace(/\bsta\.?(?=\s)/g, 'santa')      // Sta. Maria -> santa maria
+        .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+const kbInfo = {};          // place name -> knowledge.js entry (only names, plus coordinates if it has them)
+let placeTerms = null;      // [[normalized term, canonical name], ...] longest first
+function getPlaceTerms() {
+    if (placeTerms) return placeTerms;
+    const map = new Map();
+    const add = (term, name) => { const k = normText(term); if (k.length >= 3 && !map.has(k)) map.set(k, name); };
+    add(ROUTE_ANCHOR, ROUTE_ANCHOR);
+    for (const r of ROUTE_CATALOG) for (const s of r.stops) add(s, s);
+    for (const [alias, name] of Object.entries(PLACE_ALIASES)) add(alias, name);
+    try { for (const p of KB.listPlaces()) if (p && p.name) { add(p.name, p.name); kbInfo[p.name] = p; } } catch { /* no places data */ }
+    placeTerms = [...map].sort((a, b) => b[0].length - a[0].length);
+    return placeTerms;
+}
+
+function findPlaces(norm) {   // known places mentioned in the text, in the order they appear
+    const hits = [], taken = [];
+    for (const [term, name] of getPlaceTerms()) {
+        const re = new RegExp('(?:^| )' + escRegex(term) + '(?= |$)', 'g');
+        let m;
+        while ((m = re.exec(norm))) {
+            const start = m.index + (m[0].startsWith(' ') ? 1 : 0), end = start + term.length;
+            if (taken.some(([s, e]) => start < e && end > s)) continue;   // already part of a longer match
+            taken.push([start, end]);
+            hits.push({ name, idx: start });
+        }
+    }
+    hits.sort((a, b) => a.idx - b.idx);
+    const seen = new Set();
+    return hits.filter(h => !seen.has(h.name) && seen.add(h.name));
+}
+
+function coordsOf(name) {
+    if (geoCache[name]) return geoCache[name];
+    const p = kbInfo[name];
+    if (p) {
+        const lat = Number(p.lat), lon = Number(p.lon);
+        if (validCoords(lat, lon)) return { lat, lon };
+        const g = geoCache[p.q || p.name];
+        if (g) return g;
+    }
+    return null;
+}
+
+// places that are not on file: ask the map once, remember in memory only (never written to the cache file)
+const adhocGeo = new Map();
+async function adhocLookup(raw) {
+    const q = normText(raw).slice(0, 40);
+    if (q.length < 3 || q.split(' ').length > 5) return null;
+    if (adhocGeo.has(q)) return adhocGeo.get(q);
+    const g = await photonLookup(q, q);
+    if (adhocGeo.size > 200) adhocGeo.clear();
+    const val = g ? { name: q.replace(/\b[a-z]/g, c => c.toUpperCase()), lat: g.lat, lon: g.lon, approx: true } : null;
+    adhocGeo.set(q, val);
+    return val;
+}
+
+const trimFiller = (s) => String(s).replace(/\b(please|pls|po|ba|kaya|by jeepney|by jeep|jeepney|using jeepney|in a jeepney|na)\s*$/, '').replace(/\b(please|pls|po|ba|kaya)\s*$/, '').trim();
+
+async function buildPairHint(message) {
+    const out = { lines: [], resolved: false };
+    const norm = normText(message);
+    if (!FARE_RE.test(norm)) return out;
+
+    let found = findPlaces(norm).map(h => ({ name: h.name, ...(coordsOf(h.name) || {}) }));
+    let fromTo = false;
+    if (found.length < 2) {   // "from X to Y" with places we do not have on file
+        const m = norm.match(/\bfrom (.+?) (?:to|going to|hanggang|papunta sa) (.+)$/);
+        if (m) {
+            const sides = [trimFiller(m[1]), trimFiller(m[2])];
+            if (sides.every(s => s.length >= 3 && s.length <= 40 && s.split(' ').length <= 4)) {
+                fromTo = true;
+                found = [];
+                for (const s of sides) {
+                    const k = findPlaces(s)[0];
+                    if (k) { found.push({ name: k.name, ...(coordsOf(k.name) || {}) }); continue; }
+                    const g = await adhocLookup(s);
+                    found.push(g ? { ...g } : { name: s });
+                }
+            }
+        }
+    }
+
+    if (found.length < 2) {
+        if (found.length === 1 || fromTo) {
+            out.lines.push('The commuter asked about a fare or distance, but only one place could be matched. Do not guess any number. Ask them to name both the starting place and the destination (barangay, school, mall or landmark), or to use the "Where are you going?" box on the map for an estimated fare.');
+        }
+        return out;
+    }
+
+    const A = found[0], B = found[1];
+    out.resolved = true;
+    if (!Number.isFinite(A.lat) || !Number.isFinite(B.lat)) {
+        const bad = [A, B].filter(p => !Number.isFinite(p.lat)).map(p => p.name).join(' and ');
+        out.lines.push(`${A.name} to ${B.name}: the server could not locate ${bad} on the map right now (route data may still be loading). Do not guess a number. Tell the commuter to try again in a minute, or to type the destination in the "Where are you going?" box.`);
+        return out;
+    }
+
+    let km = null, verified = false;
+    if (A.name === KCC_NAME && KCC_MATRIX_KM[B.name] !== undefined) km = KCC_MATRIX_KM[B.name];
+    else if (B.name === KCC_NAME && KCC_MATRIX_KM[A.name] !== undefined) km = KCC_MATRIX_KM[A.name];
+    if (km !== null) verified = true;
+    else km = Number((getDistance(A.lat, A.lon, B.lat, B.lon) / 1000 * ROAD_FACTOR).toFixed(1));
+
+    let line = `${A.name} to ${B.name}: ${verified ? 'verified driving distance' : 'estimated road distance'} about ${km} km. Traditional fare PHP ${computeFare(km, false)}, modern fare PHP ${computeFare(km, true)}.`;
+    if (!verified) line += ' This is an estimate (straight-line distance plus 25 percent for the road), so tell the commuter the real fare may differ a little.';
+    if (A.approx || B.approx) line += ` The map position of ${[A, B].filter(p => p.approx).map(p => p.name).join(' and ')} was matched from map data and may be off.`;
+    out.lines.push(line);
+
+    // which listed routes link the two places?
+    const direct = [], nearA = [], nearB = [];
+    for (const r of ROUTE_CATALOG) {
+        const rp = routePaths[r.id];
+        if (!rp) continue;
+        const o = projectOnPath(rp.path, A.lat, A.lon), d = projectOnPath(rp.path, B.lat, B.lon);
+        const a = o.dist <= ROUTE_TOLERANCE_M, b = d.dist <= ROUTE_TOLERANCE_M;
+        if (a) nearA.push(r.id);
+        if (b) nearB.push(r.id);
+        if (a && b && Math.abs(o.along - d.along) >= MIN_RIDE_M) direct.push(r.id);
+    }
+    if (direct.length) {
+        out.lines.push(`Routes that serve both ${A.name} and ${B.name}: ${direct.slice(0, 4).join(', ')}.`);
+    } else if (nearA.length || nearB.length) {
+        let t = `No single listed route connects ${A.name} and ${B.name}. Routes near ${A.name}: ${nearA.slice(0, 4).join(', ') || 'none listed'}. Routes near ${B.name}: ${nearB.slice(0, 4).join(', ') || 'none listed'}.`;
+        const anchor = geoCache[ROUTE_ANCHOR];
+        if (anchor && nearA.length && nearB.length) {
+            const k1 = Number((getDistance(A.lat, A.lon, anchor.lat, anchor.lon) / 1000 * ROAD_FACTOR).toFixed(1));
+            const k2 = Number((getDistance(anchor.lat, anchor.lon, B.lat, B.lon) / 1000 * ROAD_FACTOR).toFixed(1));
+            t += ` Most routes start downtown (${ROUTE_ANCHOR}), so a transfer there is likely: about ${k1} km then ${k2} km, an estimated total of PHP ${(computeFare(k1, false) + computeFare(k2, false)).toFixed(2)} traditional or PHP ${(computeFare(k1, true) + computeFare(k2, true)).toFixed(2)} modern for the two jeepney fares.`;
+        }
+        out.lines.push(t);
+    }
+    return out;
+}
+
+async function buildVerifiedHint(message) {
     const text = message.toLowerCase();
     const lines = [];
-    for (const d of DISTANCES_FROM_KCC) {
-        if (d.aliases.some(a => new RegExp('\\b' + escRegex(a) + '\\b').test(text))) {
-            lines.push(`${d.label} to KCC Mall: ${d.km} km. Traditional fare PHP ${computeFare(d.km, false)}, modern fare PHP ${computeFare(d.km, true)}.`);
+    let pair = { lines: [], resolved: false };
+    try { pair = await buildPairHint(message); } catch (e) { console.error('[pair-hint]', e); }
+    lines.push(...pair.lines);
+    if (!pair.resolved) {   // a place-to-place question is not about KCC, so do not feed it KCC figures
+        for (const d of DISTANCES_FROM_KCC) {
+            if (d.aliases.some(a => new RegExp('\\b' + escRegex(a) + '\\b').test(text))) {
+                lines.push(`${d.label} to KCC Mall: ${d.km} km. Traditional fare PHP ${computeFare(d.km, false)}, modern fare PHP ${computeFare(d.km, true)}.`);
+            }
         }
     }
     const m = text.match(/(\d+(?:\.\d+)?)\s*km/);
@@ -476,8 +643,8 @@ RULES:
 1. DO NOT use markdown formatting (no asterisks, no hashtags, no bold). Use plain text only.
 2. Reply in the same language the commuter uses (English, Tagalog, Chavacano, Cebuano, etc.).
 3. If asked about a place, barangay, school, mall, hospital or tourist spot, use the PLACE DATABASE below and any SERVER-VERIFIED PLACE DATA. All 98 barangays are listed, so never say a barangay does not exist. Recognise common spellings and short names (Sta. or Santa, Sinunuc or Sinunoc or Sinnunuc, WMSU, ADZU, ZCHS, RSHS IX). If a place is not in the database, say you do not have it on file and suggest typing it into the "Where are you going?" box on the PARA-PO map.
-4. For distances, use ONLY the verified matrix or the SERVER-VERIFIED FIGURES section if present. If a distance is not listed, say you do not have a verified distance for it and suggest checking the route on the PARA-PO map. Never guess a number.
-5. For fares, use ONLY figures given in SERVER-VERIFIED FIGURES. If none are given, explain the fare rules and ask for the distance. Never calculate fares yourself.
+4. For distances, use ONLY the verified matrix or the SERVER-VERIFIED FIGURES section if present. If a distance is not listed, say you do not have a verified distance for it and suggest checking the route on the PARA-PO map. Never guess a number. When SERVER-VERIFIED FIGURES give an estimated distance or fare between two places, present it as an approximate estimate.
+5. For fares, use ONLY figures given in SERVER-VERIFIED FIGURES. If none are given, explain the fare rules and ask for the distance, or for both the starting place and the destination. Never calculate fares yourself. For a fare between two places (for example Ayala to Cawit), the server works it out and gives it to you in SERVER-VERIFIED FIGURES; if it is not there, say you could not match both places and ask the commuter to name them again.
 6. You have a ROUTE CATALOG below (route names and the places they serve). You do NOT have schedules, exact roads, or which jeepneys are online. When asked which jeepney to ride, name routes only from the catalog or the SERVER-VERIFIED ROUTE MATCHES section, say the catalog is a guide, and tell the commuter to type the destination in the "Where are you going?" box on the PARA-PO map to see the route and the jeepneys on it live. If the place is not in the catalog, say so and point to that box.
 7. Students, senior citizens and persons with disabilities are entitled to a 20 percent fare discount on public transport. Mention it when relevant. Do not claim any discount for tourists.
 8. TOURIST HELP: when someone asks for ideas, things to do, where to eat, where to stay, or what to see, recommend only places from the PLACE DATABASE or the SERVER-VERIFIED PLACE DATA. Give 3 to 5 picks, one short line each saying why it is worth it, matched to what they asked (beach, food, family, budget, sunset, culture). For a day plan, build it from the ITINERARY BUILDING BLOCKS in a sensible order and keep it to 3 or 4 stops.
@@ -582,7 +749,7 @@ app.post('/api/ask-ai', async (req, res) => {
             max_tokens: 900,
             messages: [
                 // server facts live in the system message, never in the commuter's text
-                { role: 'system', content: SYSTEM_PROMPT + buildVerifiedHint(userMessage) },
+                { role: 'system', content: SYSTEM_PROMPT + await buildVerifiedHint(userMessage) },
                 ...cleanHistory(req.body.history),
                 { role: 'user', content: `<commuter_message>${userMessage}</commuter_message>` }
             ]
