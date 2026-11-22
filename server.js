@@ -637,7 +637,7 @@ const groq = new OpenAI({
 
 const CANARY = 'PP-' + crypto.randomBytes(6).toString('hex');   // if this ever shows up in a reply, the prompt leaked
 
-const SYSTEM_PROMPT = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly.
+const SYSTEM_PROMPT = `You are PARA-PO Bot, a helpful assistant for jeepney commuters in Zamboanga City. Keep answers short and friendly. Always mention that fare calculation may be wrong and is subject to change due to recent events. Remind them to have a local, seasoned commuter to confirm.
 
 RULES:
 1. DO NOT use markdown formatting (no asterisks, no hashtags, no bold). Use plain text only.
